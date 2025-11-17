@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -922,14 +923,87 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                         }
 
                         NavigationTab.CAMERA -> {
-                            // CAMERA tab - Take photo or pick from gallery
-                            Spacer(modifier = Modifier.weight(1f))
+                            // CAMERA tab - Photo/Gallery analysis
+                            if (analysisResult != null && detectedBottles.isNotEmpty()) {
+                                // Show list of detected medicines from photo
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        "Detected medicines in photo:",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    )
+                                    detectedBottles.forEach { bottle ->
+                                        Button(
+                                            onClick = {
+                                                selectedBottleDetails = bottle
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(
+                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                                ),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = Color.Transparent,
+                                                contentColor = Color.White
+                                            ),
+                                            contentPadding = PaddingValues(12.dp)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                Text(
+                                                    text = bottle.name,
+                                                    style = MaterialTheme.typography.titleSmall
+                                                )
+                                                Text(
+                                                    text = bottle.indication,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color.White.copy(alpha = 0.7f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
 
-                            ActionButtons(
-                                onCaptureImage = ::captureImage,
-                                onPickFromGallery = { imagePickerLauncher.launch("image/*") },
-                                enabled = !isProcessing && hasCameraPermission
-                            )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        analysisResult = null
+                                        detectedBottles = emptyList()
+                                        selectedBottleDetails = null
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f),
+                                        contentColor = Color.White
+                                    )
+                                ) {
+                                    Text("Choose Another Photo", style = MaterialTheme.typography.labelMedium)
+                                }
+                            } else if (selectedBottleDetails != null) {
+                                // Show detail card for selected medicine
+                                MedicineDetailCard(medicine = selectedBottleDetails!!, onClose = {
+                                    selectedBottleDetails = null
+                                })
+                            } else {
+                                // Show photo/gallery selection buttons
+                                Spacer(modifier = Modifier.weight(1f))
+
+                                ActionButtons(
+                                    onCaptureImage = ::captureImage,
+                                    onPickFromGallery = { imagePickerLauncher.launch("image/*") },
+                                    enabled = !isProcessing && hasCameraPermission
+                                )
+                            }
                         }
 
                         NavigationTab.DICTATION, NavigationTab.MEDICAL_CONTROL, NavigationTab.HOSPITAL -> {
