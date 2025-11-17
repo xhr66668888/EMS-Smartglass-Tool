@@ -1270,7 +1270,7 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
 
                     when (selectedTab) {
                         NavigationTab.SCAN -> {
-                            // SCAN tab - On-demand scanning with history
+                            // SCAN tab - Show history always, and scan details when clicked
                             if (scanSelectedBottleDetails != null) {
                                 // Show detailed medicine info when a bottle is selected
                                 MedicineDetailCard(
@@ -1282,42 +1282,24 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                                         tts.speak(voiceText, TextToSpeech.QUEUE_FLUSH, null, null)
                                     }
                                 )
-                            } else if (currentScanImageUri != null) {
-                                // Scan result is being displayed
+                            } else if (currentScanImageUri != null && currentScanResult != null) {
+                                // Show scan result (image + medicines detected in this scan)
                                 Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    if (currentScanResult != null) {
-                                        // Analysis completed
-                                        if (currentScanResult?.bottles?.isNotEmpty() == true) {
-                                            // Show photo with medicine buttons
-                                            PhotoWithMedicineButtons(
-                                                uri = currentScanImageUri!!,
-                                                context = context,
-                                                bottles = currentScanResult!!.bottles!!,
-                                                onBottleSelected = { bottle ->
-                                                    scanSelectedBottleDetails = bottle
-                                                }
-                                            )
-                                        } else if (currentScanResult?.error != null) {
-                                            // Show error message
-                                            AnalysisResultCard(resultText = currentScanResult?.error ?: "Scan failed")
-                                        } else {
-                                            // No medicines detected
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                                    .padding(16.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    "No medicines detected in this image",
-                                                    color = Color.White.copy(alpha = 0.7f),
-                                                    style = MaterialTheme.typography.bodySmall
-                                                )
+                                    if (currentScanResult?.bottles?.isNotEmpty() == true) {
+                                        // Show photo with medicine buttons
+                                        PhotoWithMedicineButtons(
+                                            uri = currentScanImageUri!!,
+                                            context = context,
+                                            bottles = currentScanResult!!.bottles!!,
+                                            onBottleSelected = { bottle ->
+                                                scanSelectedBottleDetails = bottle
                                             }
-                                        }
+                                        )
+                                    } else if (currentScanResult?.error != null) {
+                                        // Show error message
+                                        AnalysisResultCard(resultText = currentScanResult?.error ?: "Scan failed")
                                     } else {
-                                        // Still analyzing
+                                        // No medicines detected
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -1325,13 +1307,17 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                                                 .padding(16.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                            Text(
+                                                "No medicines detected in this image",
+                                                color = Color.White.copy(alpha = 0.7f),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
                                         }
                                     }
 
                                     Spacer(modifier = Modifier.weight(1f))
 
-                                    // "Scan Again" button
+                                    // Back to history button
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -1339,64 +1325,62 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                                             .padding(8.dp),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        GradientPrimaryButton(
-                                            text = if (getScreenSize().first < 700) "Scan" else "Scan Again",
+                                        GradientSecondaryButton(
+                                            text = "Back to History",
                                             icon = Icons.Filled.CameraAlt,
-                                            onClick = ::scanImageForAnalysis,
-                                            enabled = !isProcessing && hasCameraPermission,
+                                            onClick = {
+                                                currentScanImageUri = null
+                                                currentScanResult = null
+                                            },
+                                            enabled = true,
                                             isSmallScreen = getScreenSize().first < 700
                                         )
                                     }
                                 }
-                            } else if (scanHistories.isNotEmpty()) {
+                            } else {
                                 // Show history list
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .weight(1f)
                                         .verticalScroll(rememberScrollState()),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Text(
-                                        text = "Recent Scans (${scanHistories.size})",
+                                        text = "Scans (${scanHistories.size})",
                                         style = MaterialTheme.typography.titleSmall,
                                         color = Color.White,
                                         modifier = Modifier.padding(bottom = 8.dp)
                                     )
 
-                                    scanHistories.forEachIndexed { index, history ->
-                                        ScanHistoryItem(
-                                            history = history,
-                                            context = context,
-                                            isSelected = selectedHistoryIndex == index,
-                                            onSelect = {
-                                                selectedHistoryIndex = index
-                                                currentScanImageUri = Uri.parse(history.imageUri)
-                                                currentScanResult = MedicineAnalysis(
-                                                    bottles = history.bottles,
-                                                    for_display = "Loaded from history",
-                                                    for_voice = "Scan from ${history.timestamp}"
-                                                )
-                                            }
+                                    if (scanHistories.isNotEmpty()) {
+                                        scanHistories.forEachIndexed { index, history ->
+                                            ScanHistoryItem(
+                                                history = history,
+                                                context = context,
+                                                isSelected = selectedHistoryIndex == index,
+                                                onSelect = {
+                                                    selectedHistoryIndex = index
+                                                    currentScanImageUri = Uri.parse(history.imageUri)
+                                                    currentScanResult = MedicineAnalysis(
+                                                        bottles = history.bottles,
+                                                        for_display = "Loaded from history",
+                                                        for_voice = "Scan from ${history.timestamp}"
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "No scans yet. Tap below to scan medicines.",
+                                            color = Color.White.copy(alpha = 0.6f),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier.padding(16.dp)
                                         )
                                     }
-
-                                    Spacer(modifier = Modifier.height(16.dp))
                                 }
 
-                                Spacer(modifier = Modifier.weight(1f))
-
-                                // "Tap to Scan" button
-                                GradientPrimaryButton(
-                                    text = if (getScreenSize().first < 700) "Scan" else "Tap to Scan",
-                                    icon = Icons.Filled.CameraAlt,
-                                    onClick = ::scanImageForAnalysis,
-                                    enabled = !isProcessing && hasCameraPermission,
-                                    isSmallScreen = getScreenSize().first < 700
-                                )
-                            } else {
-                                // No history yet, show "Tap to Scan" button
-                                Spacer(modifier = Modifier.weight(1f))
-
+                                // "Tap to Scan" button at bottom
                                 GradientPrimaryButton(
                                     text = if (getScreenSize().first < 700) "Scan" else "Tap to Scan",
                                     icon = Icons.Filled.CameraAlt,
