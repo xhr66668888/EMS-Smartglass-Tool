@@ -39,9 +39,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Image
@@ -72,6 +76,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -714,6 +719,90 @@ enum class NavigationTab(val label: String, val icon: ImageVector) {
 }
 
 @Composable
+private fun CameraPhotoDisplay(
+    uri: Uri,
+    context: Context,
+    detectedBottles: List<MedicineBottle>,
+    onBottleSelected: (MedicineBottle) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val screenSize = getScreenSize()
+
+    LaunchedEffect(uri) {
+        bitmap = try {
+            decodeBitmapForUpload(context, uri, maxDimension = 720)
+        } catch (e: Exception) {
+            Log.e("CameraPhotoDisplay", "Failed to load image: ${e.message}")
+            null
+        }
+    }
+
+    Box(modifier = modifier) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!.asImageBitmap(),
+                contentDescription = "Selected photo",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+
+            // Draw plus buttons on detected medicines
+            detectedBottles.forEach { bottle ->
+                // Calculate position
+                val xPx = remember(bottle.position, screenSize) {
+                    try {
+                        if (bottle.position != null && bottle.position.contains(",")) {
+                            bottle.position.split(",")[0].toFloatOrNull()?.times(screenSize.first) ?: (screenSize.first / 2).toFloat()
+                        } else {
+                            (screenSize.first / 2).toFloat()
+                        }
+                    } catch (_: Exception) {
+                        (screenSize.first / 2).toFloat()
+                    }
+                }
+                val yPx = remember(bottle.position, screenSize) {
+                    try {
+                        if (bottle.position != null && bottle.position.contains(",")) {
+                            bottle.position.split(",")[1].toFloatOrNull()?.times(screenSize.second) ?: (screenSize.second / 2).toFloat()
+                        } else {
+                            (screenSize.second / 2).toFloat()
+                        }
+                    } catch (_: Exception) {
+                        (screenSize.second / 2).toFloat()
+                    }
+                }
+
+                Button(
+                    onClick = { onBottleSelected(bottle) },
+                    modifier = Modifier
+                        .offset(xPx.dp, yPx.dp)
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(50))
+                        .shadow(4.dp, RoundedCornerShape(50)),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("+", style = MaterialTheme.typography.displaySmall, fontSize = 22.sp)
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+    }
+}
+
+@Composable
 private fun BottomNavigationBar(
     selectedTab: NavigationTab,
     onTabSelected: (NavigationTab) -> Unit,
@@ -917,99 +1006,55 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
 
                     when (selectedTab) {
                         NavigationTab.SCAN -> {
-                            // SCAN tab - Real-time scanning with bottle selection
+                            // SCAN tab - Real-time scanning with automatic detection
                             if (selectedBottleDetails != null) {
                                 // Show detailed medicine info when a bottle is selected
                                 MedicineDetailCard(medicine = selectedBottleDetails!!, onClose = {
                                     selectedBottleDetails = null
                                 })
-                            } else if (detectedBottles.isNotEmpty()) {
-                                // Show bottle selector
-                                MultiBottleSelector(
-                                    bottles = detectedBottles,
-                                    selectedBottleId = selectedBottleId,
-                                    onBottleSelected = { bottleId ->
-                                        selectedBottleId = bottleId
-                                        selectedBottleDetails = detectedBottles.find { it.id == bottleId }
-                                    }
-                                )
                             } else {
                                 // Show instructions or previous result
                                 val resultText = analysisResult?.for_display ?: analysisResult?.error
                                 if (resultText != null) {
                                     AnalysisResultCard(resultText = resultText)
+                                } else if (detectedBottles.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(1f),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "Scanning for medicines...\nPoint camera at medicines",
+                                            color = Color.White.copy(alpha = 0.7f),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
                                 }
                             }
-
-                            Spacer(modifier = Modifier.weight(1f))
-
-                            // Scan button for SCAN tab
-                            GradientPrimaryButton(
-                                text = if (isSmallScreen) "Scan" else "Scan Now",
-                                icon = Icons.Filled.CameraAlt,
-                                onClick = ::captureImage,
-                                enabled = !isProcessing && hasCameraPermission,
-                                isSmallScreen = isSmallScreen,
-                                modifier = Modifier.fillMaxWidth()
-                            )
                         }
 
                         NavigationTab.CAMERA -> {
-                            // CAMERA tab - Photo analysis with detection overlay
+                            // CAMERA tab - Photo with medicine detection overlay
                             if (cameraSelectedBottleDetails != null) {
                                 // Show detailed medicine info for selected medicine
                                 MedicineDetailCard(medicine = cameraSelectedBottleDetails!!, onClose = {
                                     cameraSelectedBottleDetails = null
                                 })
-                            } else if (cameraPhotoUri != null && cameraDetectedBottles.isNotEmpty()) {
-                                // Show list of detected medicines from the photo
-                                Column(
+                            } else if (cameraPhotoUri != null) {
+                                // Show photo with detection overlay
+                                CameraPhotoDisplay(
+                                    uri = cameraPhotoUri!!,
+                                    context = context,
+                                    detectedBottles = cameraDetectedBottles,
+                                    onBottleSelected = { bottle ->
+                                        cameraSelectedBottleDetails = bottle
+                                    },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .weight(1f)
-                                        .verticalScroll(rememberScrollState()),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        "Medicines detected:",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    )
-                                    cameraDetectedBottles.forEach { bottle ->
-                                        Button(
-                                            onClick = {
-                                                cameraSelectedBottleDetails = bottle
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(
-                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                                                ),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = Color.Transparent,
-                                                contentColor = Color.White
-                                            ),
-                                            contentPadding = PaddingValues(12.dp)
-                                        ) {
-                                            Column(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalArrangement = Arrangement.Center
-                                            ) {
-                                                Text(
-                                                    text = bottle.name,
-                                                    style = MaterialTheme.typography.titleSmall
-                                                )
-                                                Text(
-                                                    text = bottle.indication,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = Color.White.copy(alpha = 0.7f)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
+                                )
 
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Button(
@@ -1186,7 +1231,7 @@ suspend fun processImageWithVisionModel(bitmap: Bitmap, httpClient: HttpClient):
 
             SINGLE MEDICINE RESPONSE:
             {
-              "for_voice": "[Drug Name]: [Use]. Dosage: [dose/route]. Key precautions: [warnings].",
+              "for_voice": "[Drug Name]. [Use in 5 words max]. [Dosage].",
               "for_display": "[Drug Name]\n[Primary Use]",
               "error": null
             }
@@ -1215,7 +1260,7 @@ suspend fun processImageWithVisionModel(bitmap: Bitmap, httpClient: HttpClient):
                   "recommendedDosage": "[Typical dosage/concentration/route]"
                 }
               ],
-              "summary": "Multiple medicines detected. Say: Red bottle (left) - [Drug], White bottle (center) - [Drug]",
+              "summary": "[Drug1]. [Use]. [Drug2]. [Use].",
               "error": null
             }
 
@@ -1226,7 +1271,7 @@ suspend fun processImageWithVisionModel(bitmap: Bitmap, httpClient: HttpClient):
             - indication: Max 10 words, quick reference label
             - color: Simple description (e.g., "Red", "Yellow", "Blue", "White")
             - position: left/center/right based on visual location
-            - for_voice: Readable in <30 seconds, include name/use/dosage/warnings
+            - for_voice: SHORT AUDIO - Only drug name, use in 5 words max, and dosage. Keep it under 15 seconds speech.
             - for_display: Max 2 lines, name + primary use
             - Return ONLY JSON, no markdown or explanations
             """.trimIndent()
