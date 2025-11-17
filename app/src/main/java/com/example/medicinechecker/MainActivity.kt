@@ -1161,59 +1161,57 @@ suspend fun processImageWithVisionModel(bitmap: Bitmap, httpClient: HttpClient):
             val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
             val prompt = """
-            You are an EMS on-scene assistant. Identify medicines from images and provide critical information in plain English.
+You are an expert medicine identification assistant. Analyze medicine bottle images and extract structured information.
 
-            TASK:
-            1. Check if image shows clinical medicine(s). If not: {"error": "not a medicine"}
-            2. Identify ALL visible medicines (single or multiple bottles)
-            3. For EACH medicine, provide: position/color, name, clinical situations, effects, recommended dosage
-            4. Return ONLY valid JSON
+CRITICAL RULES:
+- Always return VALID JSON. Never return markdown, code blocks, or explanations
+- If image shows no medicine: return {"error": "not a medicine"}
+- Always fill ALL required fields for each medicine
 
-            SINGLE MEDICINE RESPONSE:
-            {
-              "for_voice": "[Drug Name]. [Use in 5 words max]. [Dosage].",
-              "for_display": "[Drug Name]\n[Primary Use]",
-              "error": null
-            }
+SINGLE MEDICINE FORMAT:
+{
+  "for_voice": "[Drug Name]: [main use in 5 words]. Dosage: [typical dose].",
+  "for_display": "Medicine: [Drug Name]\n\nIndication: [what it treats]\n\nEffects: [what it does]\n\nDosage: [how to use]",
+  "error": null,
+  "bottles": [{
+    "id": "bottle_1",
+    "name": "[Drug Name - full name]",
+    "position": "[left/center/right]",
+    "color": "[color]",
+    "indication": "[brief use]",
+    "appliedSituations": "[conditions it treats]",
+    "effects": "[therapeutic effects]",
+    "recommendedDosage": "[dosage information]"
+  }]
+}
 
-            MULTIPLE MEDICINES RESPONSE (if 2+ bottles detected):
-            {
-              "bottles": [
-                {
-                  "id": "bottle_1",
-                  "position": "left",
-                  "name": "[Drug Name]",
-                  "color": "[color description]",
-                  "indication": "[Brief use in <10 words]",
-                  "appliedSituations": "[Clinical conditions/diseases this treats]",
-                  "effects": "[Key therapeutic effects]",
-                  "recommendedDosage": "[Typical dosage/concentration/route]"
-                },
-                {
-                  "id": "bottle_2",
-                  "position": "center",
-                  "name": "[Drug Name]",
-                  "color": "[color description]",
-                  "indication": "[Brief use in <10 words]",
-                  "appliedSituations": "[Clinical conditions/diseases this treats]",
-                  "effects": "[Key therapeutic effects]",
-                  "recommendedDosage": "[Typical dosage/concentration/route]"
-                }
-              ],
-              "summary": "[Drug 1], [Drug 2]",
-              "error": null
-            }
+MULTIPLE MEDICINES FORMAT:
+{
+  "for_voice": "[Drug 1]. [Drug 2]. [Optional: Drug 3]",
+  "for_display": "Multiple Medicines Detected:\n\n[Drug 1]\nIndication: [use]\nDosage: [dose]\n\n[Drug 2]\nIndication: [use]\nDosage: [dose]",
+  "error": null,
+  "bottles": [
+    {"id": "bottle_1", "name": "[Drug Name]", "position": "left", "color": "[color]", "indication": "[brief]", "appliedSituations": "[conditions]", "effects": "[effects]", "recommendedDosage": "[dosage]"},
+    {"id": "bottle_2", "name": "[Drug Name]", "position": "center", "color": "[color]", "indication": "[brief]", "appliedSituations": "[conditions]", "effects": "[effects]", "recommendedDosage": "[dosage]"}
+  ]
+}
 
-            RULES:
-            - appliedSituations: Describe what diseases/conditions this medicine treats (e.g., "Hypertension, high blood pressure")
-            - effects: Describe what this medicine does (e.g., "Lowers blood pressure, reduces cardiac workload")
-            - recommendedDosage: Common dosing information (e.g., "10-20mg once daily" or "2-4 drops every 4 hours")
-            - indication: Max 10 words, quick reference label
-            - color: Simple description (e.g., "Red", "Yellow", "Blue", "White")
-            - position: left/center/right based on visual location
-            - for_voice: SHORT (<15 seconds to read). Format: "[Drug Name]. [Clinical use in max 5 words]. [Typical dosage]." Example: "Aspirin. Pain relief and blood thinner. 500mg to 1000mg daily."
-            - for_display: Detailed information, can be longer
-            - Return ONLY JSON, no markdown or explanations
+FIELD DEFINITIONS:
+- name: Full medicine name (e.g., "Ibuprofen 400mg")
+- position: Visual location - "left", "center", or "right"
+- color: Bottle color (e.g., "White", "Orange", "Blue")
+- indication: ONE sentence, max 10 words - quick reference
+- appliedSituations: List of diseases/conditions (e.g., "Fever, inflammation, headache, pain")
+- effects: What it does in body (e.g., "Anti-inflammatory, pain relief, fever reduction")
+- recommendedDosage: Usage info (e.g., "400-600mg every 4-6 hours", "2 tablets with water", "10ml three times daily")
+- for_voice: SHORT - max 15 seconds speech. Format: "[Name]: [5-word use]. Dosage: [dose]." Example: "Aspirin: Pain relief and blood thinner. Dosage: 500mg to 1000mg."
+- for_display: DETAILED - clear formatting with newlines, full information about medicine
+
+TASK:
+1. Identify all visible medicines in image
+2. For EACH medicine, extract position, color, name, clinical information
+3. Return ONLY the JSON structure above - NO other text
+4. If uncertain about any field, use reasonable medical knowledge
             """.trimIndent()
 
             val requestBody = GeminiVisionRequest(
