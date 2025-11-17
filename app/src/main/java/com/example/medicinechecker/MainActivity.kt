@@ -787,6 +787,12 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
     var analysisResult by remember { mutableStateOf<MedicineAnalysis?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
 
+    // CAMERA tab specific states
+    var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var cameraAnalysisResult by remember { mutableStateOf<MedicineAnalysis?>(null) }
+    var cameraDetectedBottles by remember { mutableStateOf<List<MedicineBottle>>(emptyList()) }
+    var cameraSelectedBottleDetails by remember { mutableStateOf<MedicineBottle?>(null) }
+
     val tts = remember {
         TextToSpeech(context, null).apply {
             language = Locale.ENGLISH
@@ -832,6 +838,32 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri: Uri? -> uri?.let { processImage(it, fromCamera = false) } }
+    )
+
+    // Separate launcher for CAMERA tab photo selection
+    val cameraPhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+        onResult = { uri: Uri? ->
+            uri?.let {
+                cameraPhotoUri = it
+                isProcessing = true
+                coroutineScope.launch {
+                    try {
+                        val bitmap = decodeBitmapForUpload(context, it)
+                        cameraAnalysisResult = processImageWithVisionModel(bitmap, httpClient)
+                        cameraAnalysisResult?.bottles?.let { bottles ->
+                            if (bottles.isNotEmpty()) {
+                                cameraDetectedBottles = bottles
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("CameraPhotoAnalysis", "Failed to analyze photo", e)
+                        cameraAnalysisResult = MedicineAnalysis(error = "Analysis failed: ${e.localizedMessage}")
+                    }
+                    isProcessing = false
+                }
+            }
+        }
     )
 
     fun captureImage() {
@@ -923,9 +955,14 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                         }
 
                         NavigationTab.CAMERA -> {
-                            // CAMERA tab - Photo/Gallery analysis
-                            if (analysisResult != null && detectedBottles.isNotEmpty()) {
-                                // Show list of detected medicines from photo
+                            // CAMERA tab - Photo analysis with detection overlay
+                            if (cameraSelectedBottleDetails != null) {
+                                // Show detailed medicine info for selected medicine
+                                MedicineDetailCard(medicine = cameraSelectedBottleDetails!!, onClose = {
+                                    cameraSelectedBottleDetails = null
+                                })
+                            } else if (cameraPhotoUri != null && cameraDetectedBottles.isNotEmpty()) {
+                                // Show list of detected medicines from the photo
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -934,15 +971,15 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Text(
-                                        "Detected medicines in photo:",
+                                        "Medicines detected:",
                                         style = MaterialTheme.typography.titleSmall,
                                         color = Color.White,
                                         modifier = Modifier.padding(bottom = 8.dp)
                                     )
-                                    detectedBottles.forEach { bottle ->
+                                    cameraDetectedBottles.forEach { bottle ->
                                         Button(
                                             onClick = {
-                                                selectedBottleDetails = bottle
+                                                cameraSelectedBottleDetails = bottle
                                             },
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -977,9 +1014,10 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Button(
                                     onClick = {
-                                        analysisResult = null
-                                        detectedBottles = emptyList()
-                                        selectedBottleDetails = null
+                                        cameraPhotoUri = null
+                                        cameraAnalysisResult = null
+                                        cameraDetectedBottles = emptyList()
+                                        cameraSelectedBottleDetails = null
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(
@@ -989,18 +1027,13 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                                 ) {
                                     Text("Choose Another Photo", style = MaterialTheme.typography.labelMedium)
                                 }
-                            } else if (selectedBottleDetails != null) {
-                                // Show detail card for selected medicine
-                                MedicineDetailCard(medicine = selectedBottleDetails!!, onClose = {
-                                    selectedBottleDetails = null
-                                })
                             } else {
-                                // Show photo/gallery selection buttons
+                                // Show capture/gallery buttons
                                 Spacer(modifier = Modifier.weight(1f))
 
                                 ActionButtons(
                                     onCaptureImage = ::captureImage,
-                                    onPickFromGallery = { imagePickerLauncher.launch("image/*") },
+                                    onPickFromGallery = { cameraPhotoPickerLauncher.launch("image/*") },
                                     enabled = !isProcessing && hasCameraPermission
                                 )
                             }
