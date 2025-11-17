@@ -1131,7 +1131,7 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                     MedicineAnalysis(error = "Scan failed: ${it.localizedMessage ?: "Unknown error"}")
                 }
 
-                // Save to history (max 10 items, FIFO)
+                // Save to history (max 10 items, FIFO - only remove oldest when exceeds 10)
                 if (currentScanResult?.bottles != null && currentScanResult?.bottles!!.isNotEmpty()) {
                     val newHistoryItem = ScanHistory(
                         id = UUID.randomUUID().toString(),
@@ -1139,7 +1139,7 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                         bottles = currentScanResult!!.bottles!!,
                         imageUri = uri.toString()
                     )
-                    scanHistories = listOf(newHistoryItem) + scanHistories.take(9) // Max 10 items
+                    scanHistories = (listOf(newHistoryItem) + scanHistories).take(10) // Keep up to 10 items
                     Log.d("ScanAnalysis", "Added to history. Total items: ${scanHistories.size}")
                 }
 
