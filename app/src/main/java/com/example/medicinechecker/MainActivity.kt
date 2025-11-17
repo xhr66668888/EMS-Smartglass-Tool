@@ -23,6 +23,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +34,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -71,7 +74,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -98,6 +107,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.Executor
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -149,7 +159,23 @@ data class MedicineBottle(
     val effects: String? = null,
     val appliedSituations: String? = null,
     val recommendedDosage: String? = null,
-    val dosage: String? = null
+    val dosage: String? = null,
+    val for_voice: String? = null,
+    val outline: List<OutlinePoint>? = null
+)
+
+@Serializable
+data class OutlinePoint(
+    val x: Float,  // 0.0 to 1.0 representing percentage of image width
+    val y: Float   // 0.0 to 1.0 representing percentage of image height
+)
+
+@Serializable
+data class ScanHistory(
+    val id: String = "",
+    val timestamp: Long = 0L,
+    val bottles: List<MedicineBottle> = emptyList(),
+    val imageUri: String = ""  // Image file path
 )
 
 @Serializable
@@ -342,6 +368,166 @@ private fun BottleButton(
 }
 
 @Composable
+private fun PhotoWithMedicineButtons(
+    uri: Uri,
+    context: Context,
+    bottles: List<MedicineBottle>,
+    onBottleSelected: (MedicineBottle) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(uri) {
+        bitmap = try {
+            decodeBitmapForUpload(context, uri, maxDimension = 720)
+        } catch (e: Exception) {
+            Log.e("PhotoWithMedicineButtons", "Failed to load image: ${e.message}")
+            null
+        }
+    }
+
+    // Color palette for different medicines
+    val medicineColors = listOf(
+        Color(0xFFFF6B6B),  // Red
+        Color(0xFF4ECDC4),  // Teal
+        Color(0xFFFFE66D),  // Yellow
+        Color(0xFF95E1D3),  // Mint
+        Color(0xFFC7CEEA),  // Lavender
+        Color(0xFFFF8B94),  // Pink
+        Color(0xFFB4A7D6),  // Purple
+        Color(0xFF73A580),  // Green
+    )
+
+    fun getPositionLabel(bottle: MedicineBottle, index: Int, totalCount: Int): String {
+        // If only one medicine, no position label needed
+        if (totalCount == 1) {
+            return ""
+        }
+
+        val position = bottle.position?.lowercase() ?: ""
+        val color = bottle.color?.lowercase() ?: ""
+
+        return when {
+            // For 2-3 medicines: use left/center/right descriptions
+            totalCount in 2..3 -> {
+                when (position) {
+                    "left" -> "[Left] "
+                    "center" -> "[Center] "
+                    "right" -> "[Right] "
+                    else -> "[Position ${index + 1}] "
+                }
+            }
+            // For many medicines: use color as identifier
+            totalCount > 3 -> {
+                when {
+                    color.isNotEmpty() && color != "unknown" -> "[${color.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }}] "
+                    else -> "[Item ${index + 1}] "
+                }
+            }
+            else -> "[Item ${index + 1}] "
+        }
+    }
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        if (bitmap != null) {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Image
+                Image(
+                    bitmap = bitmap!!.asImageBitmap(),
+                    contentDescription = "Selected medicine photo",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Fit
+                )
+
+                // Medicine list
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            MaterialTheme.colorScheme.surface,
+                            RoundedCornerShape(12.dp)
+                        )
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Detected ${bottles.size} medicine(s):",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+
+                    bottles.forEachIndexed { index, bottle ->
+                        val colorIndex = index % medicineColors.size
+                        val itemColor = medicineColors[colorIndex]
+                        val positionLabel = getPositionLabel(bottle, index, bottles.size)
+
+                        Button(
+                            onClick = { onBottleSelected(bottle) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = itemColor.copy(alpha = 0.2f),
+                                contentColor = itemColor
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.5.dp, itemColor.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = positionLabel + bottle.name,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1
+                                    )
+                                    bottle.indication?.let {
+                                        if (it.isNotBlank()) {
+                                            Text(
+                                                text = it,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = itemColor.copy(alpha = 0.7f),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(
+                                    text = "+",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun AnalysisResultCard(resultText: String, modifier: Modifier = Modifier) {
     val scrollState = rememberScrollState()
     val isSmallScreen = getScreenSize().first < 700
@@ -387,12 +573,26 @@ private fun AnalysisResultCard(resultText: String, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun MedicineDetailCard(medicine: MedicineBottle, modifier: Modifier = Modifier, onClose: () -> Unit = {}) {
+private fun MedicineDetailCard(
+    medicine: MedicineBottle,
+    modifier: Modifier = Modifier,
+    onClose: () -> Unit = {},
+    onVoiceOutput: ((String) -> Unit)? = null
+) {
     val scrollState = rememberScrollState()
     val isSmallScreen = getScreenSize().first < 700
     val cornerSize = if (isSmallScreen) 16.dp else 36.dp
     val shadowSize = if (isSmallScreen) 12.dp else 26.dp
     val padding = if (isSmallScreen) 12.dp else 28.dp
+
+    // Play voice output when card is shown
+    LaunchedEffect(medicine) {
+        medicine.for_voice?.let { voiceText ->
+            if (voiceText.isNotBlank()) {
+                onVoiceOutput?.invoke(voiceText)
+            }
+        }
+    }
 
     Box(
         modifier = modifier
@@ -759,6 +959,75 @@ private fun BottomNavigationBar(
 }
 
 @Composable
+private fun ScanHistoryItem(
+    history: ScanHistory,
+    context: Context,
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isSmallScreen = getScreenSize().first < 700
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val timeText = remember(history.timestamp) {
+        val sdf = java.text.SimpleDateFormat("HH:mm:ss", Locale.ROOT)
+        sdf.format(history.timestamp)
+    }
+
+    Button(
+        onClick = onSelect,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(if (isSmallScreen) 8.dp else 12.dp))
+            .background(
+                if (isSelected)
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                else
+                    Color.White.copy(alpha = 0.08f)
+            ),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color.Transparent,
+            contentColor = textColor
+        ),
+        contentPadding = PaddingValues(if (isSmallScreen) 10.dp else 12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(if (isSmallScreen) 4.dp else 8.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${history.bottles.size} medicine(s)",
+                    style = if (isSmallScreen) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
+                    maxLines = 1
+                )
+                Text(
+                    text = timeText,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = if (isSmallScreen) 9.sp else 10.sp,
+                    color = textColor.copy(alpha = 0.6f),
+                    maxLines = 1
+                )
+            }
+
+            if (history.bottles.isNotEmpty()) {
+                Text(
+                    text = history.bottles.joinToString(", ") { it.name },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.7f),
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun MedicineAnalysisScreen(httpClient: HttpClient) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -782,9 +1051,11 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
 
     var isProcessing by remember { mutableStateOf(false) }
 
-    // SCAN tab - Real-time detection
-    var scanDetectedBottles by remember { mutableStateOf<List<MedicineBottle>>(emptyList()) }
-    var scanSelectedBottleId by remember { mutableStateOf<String?>(null) }
+    // SCAN tab - On-demand scanning with history
+    var scanHistories by remember { mutableStateOf<List<ScanHistory>>(emptyList()) }
+    var currentScanResult by remember { mutableStateOf<MedicineAnalysis?>(null) }
+    var currentScanImageUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedHistoryIndex by remember { mutableStateOf<Int?>(-1) }
     var scanSelectedBottleDetails by remember { mutableStateOf<MedicineBottle?>(null) }
 
     // CAMERA tab - Photo analysis
@@ -813,47 +1084,72 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
         }
     }
 
-    // Auto-detection loop for SCAN tab - every 2 seconds
-    LaunchedEffect(selectedTab, hasCameraPermission) {
-        if (selectedTab == NavigationTab.SCAN && hasCameraPermission && !isProcessing) {
-            while (true) {
-                try {
-                    kotlinx.coroutines.delay(2000) // 2 seconds
-                    if (selectedTab == NavigationTab.SCAN && hasCameraPermission && !isProcessing) {
-                        try {
-                            val uri = imageCapture.takePicture(context)
-                            isProcessing = true
-                            scanSelectedBottleId = null
-                            scanSelectedBottleDetails = null
-                            scanDetectedBottles = emptyList()
+    fun scanImageForAnalysis() {
+        coroutineScope.launch {
+            try {
+                isProcessing = true
+                // Reset state
+                scanSelectedBottleDetails = null
+                selectedHistoryIndex = -1
 
-                            val result = runCatching {
-                                val bitmap = decodeBitmapForUpload(context, uri)
-                                processImageWithVisionModel(bitmap, httpClient)
-                            }.getOrElse {
-                                Log.e("MedicineAnalysis", "Failed to process image in auto-detection", it)
-                                MedicineAnalysis(error = "Auto-detection failed")
+                val uri = imageCapture.takePicture(context)
+                currentScanImageUri = uri
+                Log.d("ScanAnalysis", "Starting to scan image: $uri")
+
+                currentScanResult = runCatching {
+                    Log.d("ScanAnalysis", "Decoding bitmap...")
+                    val bitmap = decodeBitmapForUpload(context, uri)
+                    Log.d("ScanAnalysis", "Bitmap decoded, size: ${bitmap.width}x${bitmap.height}")
+
+                    Log.d("ScanAnalysis", "Sending to Gemini for medicine analysis...")
+                    val result = processImageWithVisionModel(bitmap, httpClient)
+                    Log.d("ScanAnalysis", "Gemini result: $result")
+
+                    // Get outline coordinates for each bottle
+                    if (result.bottles != null && result.bottles.isNotEmpty()) {
+                        Log.d("ScanAnalysis", "Getting medicine outlines...")
+                        val outlines = getMedicineOutlines(bitmap, httpClient)
+                        Log.d("ScanAnalysis", "Got outlines for ${outlines.size} bottles")
+
+                        // Add outlines to bottles
+                        val bottlesWithOutlines = result.bottles.mapIndexed { index, bottle ->
+                            val outlineKey = "bottle_${index + 1}"
+                            val outline = outlines[outlineKey]
+                            if (outline != null) {
+                                bottle.copy(outline = outline)
+                            } else {
+                                bottle
                             }
-
-                            // Extract and update bottles for SCAN
-                            if (result.bottles != null && result.bottles.isNotEmpty()) {
-                                scanDetectedBottles = result.bottles
-                                Log.d("MedicineAnalysis", "Auto-detected ${scanDetectedBottles.size} bottles")
-                            }
-
-                            cleanupTemporaryImage(context, uri)
-                            isProcessing = false
-                        } catch (e: Exception) {
-                            Log.e("MedicineAnalysis", "Auto-detection capture failed", e)
-                            isProcessing = false
                         }
+
+                        result.copy(bottles = bottlesWithOutlines)
                     } else {
-                        break
+                        result
                     }
-                } catch (e: Exception) {
-                    Log.e("MedicineAnalysis", "Auto-detection loop error", e)
-                    break
+                }.getOrElse {
+                    Log.e("ScanAnalysis", "Failed to process scan image: ${it.message}", it)
+                    MedicineAnalysis(error = "Scan failed: ${it.localizedMessage ?: "Unknown error"}")
                 }
+
+                // Save to history (max 10 items, FIFO)
+                if (currentScanResult?.bottles != null && currentScanResult?.bottles!!.isNotEmpty()) {
+                    val newHistoryItem = ScanHistory(
+                        id = UUID.randomUUID().toString(),
+                        timestamp = System.currentTimeMillis(),
+                        bottles = currentScanResult!!.bottles!!,
+                        imageUri = uri.toString()
+                    )
+                    scanHistories = listOf(newHistoryItem) + scanHistories.take(9) // Max 10 items
+                    Log.d("ScanAnalysis", "Added to history. Total items: ${scanHistories.size}")
+                }
+
+                cleanupTemporaryImage(context, uri)
+                isProcessing = false
+                Log.d("ScanAnalysis", "Scan complete. Result: $currentScanResult")
+            } catch (e: Exception) {
+                Log.e("ScanAnalysis", "Failed to capture image for scan", e)
+                currentScanResult = MedicineAnalysis(error = "Capture failed: ${e.localizedMessage}")
+                isProcessing = false
             }
         }
     }
@@ -865,18 +1161,48 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
             cameraSelectedBottleDetails = null
             cameraDetectedBottles = emptyList()
             cameraPhotoUri = uri
+            Log.d("CameraProcessing", "Starting to process image: $uri")
 
             cameraAnalysisResult = runCatching {
+                Log.d("CameraProcessing", "Decoding bitmap...")
                 val bitmap = decodeBitmapForUpload(context, uri)
-                processImageWithVisionModel(bitmap, httpClient)
+                Log.d("CameraProcessing", "Bitmap decoded, size: ${bitmap.width}x${bitmap.height}")
+
+                Log.d("CameraProcessing", "Sending to Gemini for medicine analysis...")
+                val result = processImageWithVisionModel(bitmap, httpClient)
+                Log.d("CameraProcessing", "Gemini result: $result")
+
+                // Get outline coordinates for each bottle
+                if (result.bottles != null && result.bottles.isNotEmpty()) {
+                    Log.d("CameraProcessing", "Getting medicine outlines...")
+                    val outlines = getMedicineOutlines(bitmap, httpClient)
+                    Log.d("CameraProcessing", "Got outlines for ${outlines.size} bottles")
+
+                    // Add outlines to bottles
+                    val bottlesWithOutlines = result.bottles.mapIndexed { index, bottle ->
+                        val outlineKey = "bottle_${index + 1}"
+                        val outline = outlines[outlineKey]
+                        if (outline != null) {
+                            bottle.copy(outline = outline)
+                        } else {
+                            bottle
+                        }
+                    }
+
+                    result.copy(bottles = bottlesWithOutlines)
+                } else {
+                    result
+                }
             }.getOrElse {
-                Log.e("MedicineAnalysis", "Failed to process camera image", it)
+                Log.e("CameraProcessing", "Failed to process camera image: ${it.message}", it)
                 MedicineAnalysis(error = "Processing failed: ${it.localizedMessage ?: "Unknown error"}")
             }.also { result ->
                 // Extract bottles from result for CAMERA tab
                 if (result.bottles != null && result.bottles.isNotEmpty()) {
                     cameraDetectedBottles = result.bottles
-                    Log.d("MedicineAnalysis", "Camera detected ${cameraDetectedBottles.size} bottles")
+                    Log.d("CameraProcessing", "Camera detected ${cameraDetectedBottles.size} bottles")
+                } else {
+                    Log.d("CameraProcessing", "No bottles detected or error: ${result.error}")
                 }
             }
 
@@ -884,6 +1210,7 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                 cleanupTemporaryImage(context, uri)
             }
             isProcessing = false
+            Log.d("CameraProcessing", "Processing complete. Result: $cameraAnalysisResult")
         }
     }
 
@@ -943,38 +1270,140 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
 
                     when (selectedTab) {
                         NavigationTab.SCAN -> {
-                            // SCAN tab - Automatic real-time detection with "+" buttons
+                            // SCAN tab - On-demand scanning with history
                             if (scanSelectedBottleDetails != null) {
                                 // Show detailed medicine info when a bottle is selected
-                                MedicineDetailCard(medicine = scanSelectedBottleDetails!!, onClose = {
-                                    scanSelectedBottleDetails = null
-                                })
-                            } else if (scanDetectedBottles.isNotEmpty()) {
-                                // Show bottle selector with "+" buttons
-                                MultiBottleSelector(
-                                    bottles = scanDetectedBottles,
-                                    selectedBottleId = scanSelectedBottleId,
-                                    onBottleSelected = { bottleId ->
-                                        scanSelectedBottleId = bottleId
-                                        scanSelectedBottleDetails = scanDetectedBottles.find { it.id == bottleId }
+                                MedicineDetailCard(
+                                    medicine = scanSelectedBottleDetails!!,
+                                    onClose = {
+                                        scanSelectedBottleDetails = null
+                                    },
+                                    onVoiceOutput = { voiceText ->
+                                        tts.speak(voiceText, TextToSpeech.QUEUE_FLUSH, null, null)
                                     }
                                 )
-                            } else {
-                                // Waiting for detection
-                                Box(
+                            } else if (currentScanImageUri != null) {
+                                // Scan result is being displayed
+                                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    if (currentScanResult != null) {
+                                        // Analysis completed
+                                        if (currentScanResult?.bottles?.isNotEmpty() == true) {
+                                            // Show photo with medicine buttons
+                                            PhotoWithMedicineButtons(
+                                                uri = currentScanImageUri!!,
+                                                context = context,
+                                                bottles = currentScanResult!!.bottles!!,
+                                                onBottleSelected = { bottle ->
+                                                    scanSelectedBottleDetails = bottle
+                                                }
+                                            )
+                                        } else if (currentScanResult?.error != null) {
+                                            // Show error message
+                                            AnalysisResultCard(resultText = currentScanResult?.error ?: "Scan failed")
+                                        } else {
+                                            // No medicines detected
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                                    .padding(16.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    "No medicines detected in this image",
+                                                    color = Color.White.copy(alpha = 0.7f),
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        // Still analyzing
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                                .padding(16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.weight(1f))
+
+                                    // "Scan Again" button
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                            .padding(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        GradientPrimaryButton(
+                                            text = if (getScreenSize().first < 700) "Scan" else "Scan Again",
+                                            icon = Icons.Filled.CameraAlt,
+                                            onClick = ::scanImageForAnalysis,
+                                            enabled = !isProcessing && hasCameraPermission,
+                                            isSmallScreen = getScreenSize().first < 700
+                                        )
+                                    }
+                                }
+                            } else if (scanHistories.isNotEmpty()) {
+                                // Show history list
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                        .padding(16.dp),
-                                    contentAlignment = Alignment.Center
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Text(
-                                        "Point camera at medicines - Auto-detecting every 2 seconds",
-                                        color = Color.White.copy(alpha = 0.7f),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.fillMaxWidth()
+                                        text = "Recent Scans (${scanHistories.size})",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(bottom = 8.dp)
                                     )
+
+                                    scanHistories.forEachIndexed { index, history ->
+                                        ScanHistoryItem(
+                                            history = history,
+                                            context = context,
+                                            isSelected = selectedHistoryIndex == index,
+                                            onSelect = {
+                                                selectedHistoryIndex = index
+                                                currentScanImageUri = Uri.parse(history.imageUri)
+                                                currentScanResult = MedicineAnalysis(
+                                                    bottles = history.bottles,
+                                                    for_display = "Loaded from history",
+                                                    for_voice = "Scan from ${history.timestamp}"
+                                                )
+                                            }
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
                                 }
+
+                                Spacer(modifier = Modifier.weight(1f))
+
+                                // "Tap to Scan" button
+                                GradientPrimaryButton(
+                                    text = if (getScreenSize().first < 700) "Scan" else "Tap to Scan",
+                                    icon = Icons.Filled.CameraAlt,
+                                    onClick = ::scanImageForAnalysis,
+                                    enabled = !isProcessing && hasCameraPermission,
+                                    isSmallScreen = getScreenSize().first < 700
+                                )
+                            } else {
+                                // No history yet, show "Tap to Scan" button
+                                Spacer(modifier = Modifier.weight(1f))
+
+                                GradientPrimaryButton(
+                                    text = if (getScreenSize().first < 700) "Scan" else "Tap to Scan",
+                                    icon = Icons.Filled.CameraAlt,
+                                    onClick = ::scanImageForAnalysis,
+                                    enabled = !isProcessing && hasCameraPermission,
+                                    isSmallScreen = getScreenSize().first < 700
+                                )
                             }
                         }
 
@@ -982,46 +1411,81 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
                             // CAMERA tab - Photo selection and analysis
                             if (cameraSelectedBottleDetails != null) {
                                 // Show detailed medicine info when a bottle is selected
-                                MedicineDetailCard(medicine = cameraSelectedBottleDetails!!, onClose = {
-                                    cameraSelectedBottleDetails = null
-                                })
-                            } else if (cameraPhotoUri != null) {
-                                // Show photo with detected medicines
-                                if (cameraDetectedBottles.isNotEmpty()) {
-                                    MultiBottleSelector(
-                                        bottles = cameraDetectedBottles,
-                                        selectedBottleId = cameraSelectedBottleId,
-                                        onBottleSelected = { bottleId ->
-                                            cameraSelectedBottleId = bottleId
-                                            cameraSelectedBottleDetails = cameraDetectedBottles.find { it.id == bottleId }
-                                        }
-                                    )
-                                } else if (cameraAnalysisResult?.error != null) {
-                                    AnalysisResultCard(resultText = cameraAnalysisResult?.error ?: "Analysis failed")
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                            .padding(16.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            "No medicines detected in this image",
-                                            color = Color.White.copy(alpha = 0.7f),
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
+                                MedicineDetailCard(
+                                    medicine = cameraSelectedBottleDetails!!,
+                                    onClose = {
+                                        cameraSelectedBottleDetails = null
+                                    },
+                                    onVoiceOutput = { voiceText ->
+                                        tts.speak(voiceText, TextToSpeech.QUEUE_FLUSH, null, null)
                                     }
+                                )
+                            } else if (cameraPhotoUri != null) {
+                                // Photo has been selected
+                                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    if (cameraAnalysisResult != null) {
+                                        // Analysis completed
+                                        if (cameraDetectedBottles.isNotEmpty()) {
+                                            // Show photo with medicine buttons
+                                            PhotoWithMedicineButtons(
+                                                uri = cameraPhotoUri!!,
+                                                context = context,
+                                                bottles = cameraDetectedBottles,
+                                                onBottleSelected = { bottle ->
+                                                    cameraSelectedBottleDetails = bottle
+                                                }
+                                            )
+                                        } else if (cameraAnalysisResult?.error != null) {
+                                            // Show error message
+                                            AnalysisResultCard(resultText = cameraAnalysisResult?.error ?: "Analysis failed")
+                                        } else {
+                                            // No medicines detected
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                                    .padding(16.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    "No medicines detected in this image",
+                                                    color = Color.White.copy(alpha = 0.7f),
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        // Still analyzing
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                                .padding(16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.weight(1f))
+
+                                    // Show action buttons to change photo
+                                    ActionButtons(
+                                        onCaptureImage = ::captureImageForCamera,
+                                        onPickFromGallery = { imagePickerLauncher.launch("image/*") },
+                                        enabled = !isProcessing && hasCameraPermission
+                                    )
                                 }
+                            } else {
+                                // No photo selected yet
+                                Spacer(modifier = Modifier.weight(1f))
+
+                                ActionButtons(
+                                    onCaptureImage = ::captureImageForCamera,
+                                    onPickFromGallery = { imagePickerLauncher.launch("image/*") },
+                                    enabled = !isProcessing && hasCameraPermission
+                                )
                             }
-
-                            Spacer(modifier = Modifier.weight(1f))
-
-                            ActionButtons(
-                                onCaptureImage = ::captureImageForCamera,
-                                onPickFromGallery = { imagePickerLauncher.launch("image/*") },
-                                enabled = !isProcessing && hasCameraPermission
-                            )
                         }
 
                         NavigationTab.DICTATION, NavigationTab.MEDICAL_CONTROL, NavigationTab.HOSPITAL -> {
@@ -1161,57 +1625,18 @@ suspend fun processImageWithVisionModel(bitmap: Bitmap, httpClient: HttpClient):
             val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
             val prompt = """
-You are an expert medicine identification assistant. Analyze medicine bottle images and extract structured information.
+Identify pharmaceutical products in this image. Return valid JSON only.
 
-CRITICAL RULES:
-- Always return VALID JSON. Never return markdown, code blocks, or explanations
-- If image shows no medicine: return {"error": "not a medicine"}
-- Always fill ALL required fields for each medicine
+For EACH medicine bottle, provide a simple "for_voice" field with ONLY: name, clinical use (max 5 words), and dosage. Example: "Aspirin: pain relief. 500mg per dose."
 
-SINGLE MEDICINE FORMAT:
-{
-  "for_voice": "[Drug Name]: [main use in 5 words]. Dosage: [typical dose].",
-  "for_display": "Medicine: [Drug Name]\n\nIndication: [what it treats]\n\nEffects: [what it does]\n\nDosage: [how to use]",
-  "error": null,
-  "bottles": [{
-    "id": "bottle_1",
-    "name": "[Drug Name - full name]",
-    "position": "[left/center/right]",
-    "color": "[color]",
-    "indication": "[brief use]",
-    "appliedSituations": "[conditions it treats]",
-    "effects": "[therapeutic effects]",
-    "recommendedDosage": "[dosage information]"
-  }]
-}
+Return JSON format - NO markdown code blocks:
 
-MULTIPLE MEDICINES FORMAT:
-{
-  "for_voice": "[Drug 1]. [Drug 2]. [Optional: Drug 3]",
-  "for_display": "Multiple Medicines Detected:\n\n[Drug 1]\nIndication: [use]\nDosage: [dose]\n\n[Drug 2]\nIndication: [use]\nDosage: [dose]",
-  "error": null,
-  "bottles": [
-    {"id": "bottle_1", "name": "[Drug Name]", "position": "left", "color": "[color]", "indication": "[brief]", "appliedSituations": "[conditions]", "effects": "[effects]", "recommendedDosage": "[dosage]"},
-    {"id": "bottle_2", "name": "[Drug Name]", "position": "center", "color": "[color]", "indication": "[brief]", "appliedSituations": "[conditions]", "effects": "[effects]", "recommendedDosage": "[dosage]"}
-  ]
-}
+{"error": null, "bottles": [{"id": "bottle_1", "name": "medicine name", "position": "left", "color": "color", "indication": "use", "appliedSituations": "conditions", "effects": "effects", "recommendedDosage": "dosage", "for_voice": "name: use. dosage."}]}
 
-FIELD DEFINITIONS:
-- name: Full medicine name (e.g., "Ibuprofen 400mg")
-- position: Visual location - "left", "center", or "right"
-- color: Bottle color (e.g., "White", "Orange", "Blue")
-- indication: ONE sentence, max 10 words - quick reference
-- appliedSituations: List of diseases/conditions (e.g., "Fever, inflammation, headache, pain")
-- effects: What it does in body (e.g., "Anti-inflammatory, pain relief, fever reduction")
-- recommendedDosage: Usage info (e.g., "400-600mg every 4-6 hours", "2 tablets with water", "10ml three times daily")
-- for_voice: SHORT - max 15 seconds speech. Format: "[Name]: [5-word use]. Dosage: [dose]." Example: "Aspirin: Pain relief and blood thinner. Dosage: 500mg to 1000mg."
-- for_display: DETAILED - clear formatting with newlines, full information about medicine
+If no products: {"error": "not a medicine"}
 
-TASK:
-1. Identify all visible medicines in image
-2. For EACH medicine, extract position, color, name, clinical information
-3. Return ONLY the JSON structure above - NO other text
-4. If uncertain about any field, use reasonable medical knowledge
+CRITICAL: Each bottle object MUST have "for_voice" field. This is what will be spoken aloud.
+Return ONLY JSON, no markdown, no explanation.
             """.trimIndent()
 
             val requestBody = GeminiVisionRequest(
@@ -1227,14 +1652,52 @@ TASK:
 
             val url =
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY"
-            val response: GeminiResponse = httpClient.post(url) {
-                contentType(ContentType.Application.Json)
-                setBody(requestBody)
-            }.body()
+            Log.d("GeminiAPI", "Calling Gemini API")
+
+            val response: GeminiResponse = try {
+                httpClient.post(url) {
+                    contentType(ContentType.Application.Json)
+                    setBody(requestBody)
+                }.body()
+            } catch (e: Exception) {
+                Log.e("GeminiAPI", "HTTP request failed: ${e.message}", e)
+                return@withContext MedicineAnalysis(error = "API request failed: ${e.message}")
+            }
+
+            Log.d("GeminiResponse", "Response received: $response")
+
+            // Check if API returned an error
+            if (response.error != null) {
+                Log.e("GeminiResponse", "Gemini API error: ${response.error.message}")
+                return@withContext MedicineAnalysis(error = "Gemini error: ${response.error.message}")
+            }
 
             val rawText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+            Log.d("GeminiResponse", "Raw text: $rawText")
+            Log.d("GeminiResponse", "Candidates count: ${response.candidates?.size}")
+
             if (rawText.isNullOrBlank()) {
-                return@withContext MedicineAnalysis(error = "Gemini returned an empty or invalid response.")
+                Log.e("GeminiResponse", "Empty response text")
+                return@withContext MedicineAnalysis(error = "Gemini returned an empty response. This might be due to safety filtering.")
+            }
+
+            // Clean up the response - remove markdown code blocks if present
+            var cleanedText = rawText
+            if (cleanedText.contains("```")) {
+                // Extract JSON from markdown code block
+                val jsonMatch = Regex("""```(?:json)?\s*([\s\S]*?)```""").find(cleanedText)
+                if (jsonMatch != null) {
+                    cleanedText = jsonMatch.groupValues[1].trim()
+                    Log.d("GeminiResponse", "Extracted JSON from markdown: $cleanedText")
+                }
+            }
+            if (cleanedText.contains("'''")) {
+                // Extract JSON from triple quote code block
+                val jsonMatch = Regex("""'''(?:json)?\s*([\s\S]*?)'''""").find(cleanedText)
+                if (jsonMatch != null) {
+                    cleanedText = jsonMatch.groupValues[1].trim()
+                    Log.d("GeminiResponse", "Extracted JSON from triple quotes: $cleanedText")
+                }
             }
 
             try {
@@ -1242,11 +1705,11 @@ TASK:
 
                 // Try to parse as MedicineAnalysis first (single medicine)
                 return@withContext try {
-                    json.decodeFromString<MedicineAnalysis>(rawText)
+                    json.decodeFromString<MedicineAnalysis>(cleanedText)
                 } catch (e: Exception) {
                     // If single format fails, try multi-bottle format
                     try {
-                        val multiBottle = json.decodeFromString<MultibottleAnalysis>(rawText)
+                        val multiBottle = json.decodeFromString<MultibottleAnalysis>(cleanedText)
                         // Convert multi-bottle response to MedicineAnalysis for display
                         MedicineAnalysis(
                             for_voice = multiBottle.summary,
@@ -1263,13 +1726,13 @@ TASK:
                             bottles = multiBottle.bottles
                         )
                     } catch (e2: Exception) {
-                        Log.e("ProcessingError", "Failed to parse JSON response from model: $rawText", e)
-                        MedicineAnalysis(error = "Failed to parse AI response. Raw result:\n$rawText")
+                        Log.e("ProcessingError", "Failed to parse JSON response from model: $cleanedText", e2)
+                        MedicineAnalysis(error = "Failed to parse AI response. Raw result:\n$cleanedText")
                     }
                 }
             } catch (e: Exception) {
-                Log.e("ProcessingError", "Failed to parse JSON response from model: $rawText", e)
-                MedicineAnalysis(error = "Failed to parse AI response. Raw result:\n$rawText")
+                Log.e("ProcessingError", "Failed to parse JSON response from model: $cleanedText", e)
+                MedicineAnalysis(error = "Failed to parse AI response. Raw result:\n$cleanedText")
             }
         } catch (e: Exception) {
             Log.e("ProcessingError", "An error occurred", e)
@@ -1278,6 +1741,99 @@ TASK:
             if (!bitmap.isRecycled) {
                 bitmap.recycle()
             }
+        }
+    }
+}
+
+suspend fun getMedicineOutlines(bitmap: Bitmap, httpClient: HttpClient): Map<String, List<OutlinePoint>> {
+    return withContext(Dispatchers.IO) {
+        try {
+            val outputStream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+            val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+
+            val outlinePrompt = """
+For each medicine bottle in this image, provide its outline as a list of points.
+
+Return ONLY valid JSON with outline coordinates as percentage of image dimensions (0.0 to 1.0):
+
+{"outlines": {"bottle_1": [{"x": 0.1, "y": 0.2}, {"x": 0.15, "y": 0.25}, ...], "bottle_2": [...]}}
+
+For each bottle:
+- Start from top-left corner of the bottle
+- Go clockwise around the bottle perimeter
+- Use 6-10 points to define the shape
+- x: horizontal position (0=left edge, 1=right edge)
+- y: vertical position (0=top edge, 1=bottom edge)
+
+If no bottles visible: {"outlines": {}}
+
+Return ONLY JSON, no markdown, no explanation.
+            """.trimIndent()
+
+            val requestBody = GeminiVisionRequest(
+                contents = listOf(
+                    Content(
+                        parts = listOf(
+                            Part(text = outlinePrompt),
+                            Part(inline_data = InlineData(mime_type = "image/jpeg", data = base64Image))
+                        )
+                    )
+                )
+            )
+
+            val url =
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY"
+            Log.d("MedicineOutline", "Calling Gemini for outline extraction")
+
+            val response: GeminiResponse = try {
+                httpClient.post(url) {
+                    contentType(ContentType.Application.Json)
+                    setBody(requestBody)
+                }.body()
+            } catch (e: Exception) {
+                Log.e("MedicineOutline", "HTTP request failed: ${e.message}", e)
+                return@withContext emptyMap()
+            }
+
+            val rawText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+            Log.d("MedicineOutline", "Raw outline response: $rawText")
+
+            if (rawText.isNullOrBlank()) {
+                Log.w("MedicineOutline", "Empty outline response")
+                return@withContext emptyMap()
+            }
+
+            // Clean up markdown if present
+            var cleanedText = rawText
+            if (cleanedText.contains("```")) {
+                val jsonMatch = Regex("""```(?:json)?\s*([\s\S]*?)```""").find(cleanedText)
+                if (jsonMatch != null) {
+                    cleanedText = jsonMatch.groupValues[1].trim()
+                }
+            }
+            if (cleanedText.contains("'''")) {
+                val jsonMatch = Regex("""'''(?:json)?\s*([\s\S]*?)'''""").find(cleanedText)
+                if (jsonMatch != null) {
+                    cleanedText = jsonMatch.groupValues[1].trim()
+                }
+            }
+
+            try {
+                val json = Json { ignoreUnknownKeys = true }
+                @Serializable
+                data class OutlineResponse(val outlines: Map<String, List<OutlinePoint>>? = null)
+
+                val result = json.decodeFromString<OutlineResponse>(cleanedText)
+                Log.d("MedicineOutline", "Successfully parsed outlines: ${result.outlines?.keys}")
+                return@withContext result.outlines ?: emptyMap()
+            } catch (e: Exception) {
+                Log.e("MedicineOutline", "Failed to parse outline JSON: $cleanedText", e)
+                return@withContext emptyMap()
+            }
+        } catch (e: Exception) {
+            Log.e("MedicineOutline", "Error getting outlines: ${e.message}", e)
+            return@withContext emptyMap()
         }
     }
 }
