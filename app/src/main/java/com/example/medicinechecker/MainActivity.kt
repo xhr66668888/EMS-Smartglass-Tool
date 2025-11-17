@@ -33,19 +33,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Image
@@ -76,7 +71,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -719,90 +713,6 @@ enum class NavigationTab(val label: String, val icon: ImageVector) {
 }
 
 @Composable
-private fun CameraPhotoDisplay(
-    uri: Uri,
-    context: Context,
-    detectedBottles: List<MedicineBottle>,
-    onBottleSelected: (MedicineBottle) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-    val screenSize = getScreenSize()
-
-    LaunchedEffect(uri) {
-        bitmap = try {
-            decodeBitmapForUpload(context, uri, maxDimension = 720)
-        } catch (e: Exception) {
-            Log.e("CameraPhotoDisplay", "Failed to load image: ${e.message}")
-            null
-        }
-    }
-
-    Box(modifier = modifier) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = "Selected photo",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
-
-            // Draw plus buttons on detected medicines
-            detectedBottles.forEach { bottle ->
-                // Calculate position
-                val xPx = remember(bottle.position, screenSize) {
-                    try {
-                        if (bottle.position != null && bottle.position.contains(",")) {
-                            bottle.position.split(",")[0].toFloatOrNull()?.times(screenSize.first) ?: (screenSize.first / 2).toFloat()
-                        } else {
-                            (screenSize.first / 2).toFloat()
-                        }
-                    } catch (_: Exception) {
-                        (screenSize.first / 2).toFloat()
-                    }
-                }
-                val yPx = remember(bottle.position, screenSize) {
-                    try {
-                        if (bottle.position != null && bottle.position.contains(",")) {
-                            bottle.position.split(",")[1].toFloatOrNull()?.times(screenSize.second) ?: (screenSize.second / 2).toFloat()
-                        } else {
-                            (screenSize.second / 2).toFloat()
-                        }
-                    } catch (_: Exception) {
-                        (screenSize.second / 2).toFloat()
-                    }
-                }
-
-                Button(
-                    onClick = { onBottleSelected(bottle) },
-                    modifier = Modifier
-                        .offset(xPx.dp, yPx.dp)
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(50))
-                        .shadow(4.dp, RoundedCornerShape(50)),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = Color.White
-                    ),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("+", style = MaterialTheme.typography.displaySmall, fontSize = 22.sp)
-                }
-            }
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
-        }
-    }
-}
-
-@Composable
 private fun BottomNavigationBar(
     selectedTab: NavigationTab,
     onTabSelected: (NavigationTab) -> Unit,
@@ -856,9 +766,6 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
 
     var hasCameraPermission by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(NavigationTab.SCAN) }
-    var detectedBottles by remember { mutableStateOf<List<MedicineBottle>>(emptyList()) }
-    var selectedBottleId by remember { mutableStateOf<String?>(null) }
-    var selectedBottleDetails by remember { mutableStateOf<MedicineBottle?>(null) }
     val imageCapture = remember { ImageCapture.Builder().build() }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -873,13 +780,18 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
         }
     }
 
-    var analysisResult by remember { mutableStateOf<MedicineAnalysis?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
 
-    // CAMERA tab specific states
+    // SCAN tab - Real-time detection
+    var scanDetectedBottles by remember { mutableStateOf<List<MedicineBottle>>(emptyList()) }
+    var scanSelectedBottleId by remember { mutableStateOf<String?>(null) }
+    var scanSelectedBottleDetails by remember { mutableStateOf<MedicineBottle?>(null) }
+
+    // CAMERA tab - Photo analysis
     var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var cameraAnalysisResult by remember { mutableStateOf<MedicineAnalysis?>(null) }
     var cameraDetectedBottles by remember { mutableStateOf<List<MedicineBottle>>(emptyList()) }
+    var cameraSelectedBottleId by remember { mutableStateOf<String?>(null) }
     var cameraSelectedBottleDetails by remember { mutableStateOf<MedicineBottle?>(null) }
 
     val tts = remember {
@@ -892,31 +804,82 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
         onDispose { tts.shutdown() }
     }
 
-    LaunchedEffect(analysisResult) {
-        analysisResult?.for_voice?.let {
-            tts.speak(it, TextToSpeech.QUEUE_FLUSH, null, null)
+    // Play voice output when CAMERA analysis completes
+    LaunchedEffect(cameraAnalysisResult) {
+        cameraAnalysisResult?.for_voice?.let {
+            if (it.isNotBlank()) {
+                tts.speak(it, TextToSpeech.QUEUE_FLUSH, null, null)
+            }
         }
     }
 
-    fun processImage(uri: Uri, fromCamera: Boolean) {
+    // Auto-detection loop for SCAN tab - every 2 seconds
+    LaunchedEffect(selectedTab, hasCameraPermission) {
+        if (selectedTab == NavigationTab.SCAN && hasCameraPermission && !isProcessing) {
+            while (true) {
+                try {
+                    kotlinx.coroutines.delay(2000) // 2 seconds
+                    if (selectedTab == NavigationTab.SCAN && hasCameraPermission && !isProcessing) {
+                        try {
+                            val uri = imageCapture.takePicture(context)
+                            isProcessing = true
+                            scanSelectedBottleId = null
+                            scanSelectedBottleDetails = null
+                            scanDetectedBottles = emptyList()
+
+                            val result = runCatching {
+                                val bitmap = decodeBitmapForUpload(context, uri)
+                                processImageWithVisionModel(bitmap, httpClient)
+                            }.getOrElse {
+                                Log.e("MedicineAnalysis", "Failed to process image in auto-detection", it)
+                                MedicineAnalysis(error = "Auto-detection failed")
+                            }
+
+                            // Extract and update bottles for SCAN
+                            if (result.bottles != null && result.bottles.isNotEmpty()) {
+                                scanDetectedBottles = result.bottles
+                                Log.d("MedicineAnalysis", "Auto-detected ${scanDetectedBottles.size} bottles")
+                            }
+
+                            cleanupTemporaryImage(context, uri)
+                            isProcessing = false
+                        } catch (e: Exception) {
+                            Log.e("MedicineAnalysis", "Auto-detection capture failed", e)
+                            isProcessing = false
+                        }
+                    } else {
+                        break
+                    }
+                } catch (e: Exception) {
+                    Log.e("MedicineAnalysis", "Auto-detection loop error", e)
+                    break
+                }
+            }
+        }
+    }
+
+    fun processImageForCamera(uri: Uri, fromCamera: Boolean) {
         coroutineScope.launch {
             isProcessing = true
-            selectedBottleId = null // Reset selection
-            selectedBottleDetails = null
-            detectedBottles = emptyList() // Reset bottles list
-            analysisResult = runCatching {
+            cameraSelectedBottleId = null
+            cameraSelectedBottleDetails = null
+            cameraDetectedBottles = emptyList()
+            cameraPhotoUri = uri
+
+            cameraAnalysisResult = runCatching {
                 val bitmap = decodeBitmapForUpload(context, uri)
                 processImageWithVisionModel(bitmap, httpClient)
             }.getOrElse {
-                Log.e("MedicineAnalysis", "Failed to process image", it)
+                Log.e("MedicineAnalysis", "Failed to process camera image", it)
                 MedicineAnalysis(error = "Processing failed: ${it.localizedMessage ?: "Unknown error"}")
             }.also { result ->
-                // Extract bottles from result if available
+                // Extract bottles from result for CAMERA tab
                 if (result.bottles != null && result.bottles.isNotEmpty()) {
-                    detectedBottles = result.bottles
-                    Log.d("MedicineAnalysis", "Detected ${detectedBottles.size} bottles")
+                    cameraDetectedBottles = result.bottles
+                    Log.d("MedicineAnalysis", "Camera detected ${cameraDetectedBottles.size} bottles")
                 }
             }
+
             if (fromCamera) {
                 cleanupTemporaryImage(context, uri)
             }
@@ -926,43 +889,17 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
-        onResult = { uri: Uri? -> uri?.let { processImage(it, fromCamera = false) } }
+        onResult = { uri: Uri? -> uri?.let { processImageForCamera(it, fromCamera = false) } }
     )
 
-    // Separate launcher for CAMERA tab photo selection
-    val cameraPhotoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
-        onResult = { uri: Uri? ->
-            uri?.let {
-                cameraPhotoUri = it
-                isProcessing = true
-                coroutineScope.launch {
-                    try {
-                        val bitmap = decodeBitmapForUpload(context, it)
-                        cameraAnalysisResult = processImageWithVisionModel(bitmap, httpClient)
-                        cameraAnalysisResult?.bottles?.let { bottles ->
-                            if (bottles.isNotEmpty()) {
-                                cameraDetectedBottles = bottles
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e("CameraPhotoAnalysis", "Failed to analyze photo", e)
-                        cameraAnalysisResult = MedicineAnalysis(error = "Analysis failed: ${e.localizedMessage}")
-                    }
-                    isProcessing = false
-                }
-            }
-        }
-    )
-
-    fun captureImage() {
+    fun captureImageForCamera() {
         coroutineScope.launch {
             try {
                 val uri = imageCapture.takePicture(context)
-                processImage(uri, fromCamera = true)
+                processImageForCamera(uri, fromCamera = true)
             } catch (e: Exception) {
                 Log.e("MedicineAnalysis", "Failed to capture image", e)
-                analysisResult = MedicineAnalysis(error = "Capture failed: ${e.localizedMessage}")
+                cameraAnalysisResult = MedicineAnalysis(error = "Capture failed: ${e.localizedMessage}")
             }
         }
     }
@@ -1006,82 +943,85 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
 
                     when (selectedTab) {
                         NavigationTab.SCAN -> {
-                            // SCAN tab - Real-time scanning with automatic detection
-                            if (selectedBottleDetails != null) {
+                            // SCAN tab - Automatic real-time detection with "+" buttons
+                            if (scanSelectedBottleDetails != null) {
                                 // Show detailed medicine info when a bottle is selected
-                                MedicineDetailCard(medicine = selectedBottleDetails!!, onClose = {
-                                    selectedBottleDetails = null
+                                MedicineDetailCard(medicine = scanSelectedBottleDetails!!, onClose = {
+                                    scanSelectedBottleDetails = null
                                 })
-                            } else {
-                                // Show instructions or previous result
-                                val resultText = analysisResult?.for_display ?: analysisResult?.error
-                                if (resultText != null) {
-                                    AnalysisResultCard(resultText = resultText)
-                                } else if (detectedBottles.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .weight(1f),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            "Scanning for medicines...\nPoint camera at medicines",
-                                            color = Color.White.copy(alpha = 0.7f),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            textAlign = TextAlign.Center
-                                        )
+                            } else if (scanDetectedBottles.isNotEmpty()) {
+                                // Show bottle selector with "+" buttons
+                                MultiBottleSelector(
+                                    bottles = scanDetectedBottles,
+                                    selectedBottleId = scanSelectedBottleId,
+                                    onBottleSelected = { bottleId ->
+                                        scanSelectedBottleId = bottleId
+                                        scanSelectedBottleDetails = scanDetectedBottles.find { it.id == bottleId }
                                     }
+                                )
+                            } else {
+                                // Waiting for detection
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "Point camera at medicines - Auto-detecting every 2 seconds",
+                                        color = Color.White.copy(alpha = 0.7f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
                                 }
                             }
                         }
 
                         NavigationTab.CAMERA -> {
-                            // CAMERA tab - Photo with medicine detection overlay
+                            // CAMERA tab - Photo selection and analysis
                             if (cameraSelectedBottleDetails != null) {
-                                // Show detailed medicine info for selected medicine
+                                // Show detailed medicine info when a bottle is selected
                                 MedicineDetailCard(medicine = cameraSelectedBottleDetails!!, onClose = {
                                     cameraSelectedBottleDetails = null
                                 })
                             } else if (cameraPhotoUri != null) {
-                                // Show photo with detection overlay
-                                CameraPhotoDisplay(
-                                    uri = cameraPhotoUri!!,
-                                    context = context,
-                                    detectedBottles = cameraDetectedBottles,
-                                    onBottleSelected = { bottle ->
-                                        cameraSelectedBottleDetails = bottle
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .weight(1f)
-                                )
-
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Button(
-                                    onClick = {
-                                        cameraPhotoUri = null
-                                        cameraAnalysisResult = null
-                                        cameraDetectedBottles = emptyList()
-                                        cameraSelectedBottleDetails = null
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f),
-                                        contentColor = Color.White
+                                // Show photo with detected medicines
+                                if (cameraDetectedBottles.isNotEmpty()) {
+                                    MultiBottleSelector(
+                                        bottles = cameraDetectedBottles,
+                                        selectedBottleId = cameraSelectedBottleId,
+                                        onBottleSelected = { bottleId ->
+                                            cameraSelectedBottleId = bottleId
+                                            cameraSelectedBottleDetails = cameraDetectedBottles.find { it.id == bottleId }
+                                        }
                                     )
-                                ) {
-                                    Text("Choose Another Photo", style = MaterialTheme.typography.labelMedium)
+                                } else if (cameraAnalysisResult?.error != null) {
+                                    AnalysisResultCard(resultText = cameraAnalysisResult?.error ?: "Analysis failed")
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                            .padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "No medicines detected in this image",
+                                            color = Color.White.copy(alpha = 0.7f),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
                                 }
-                            } else {
-                                // Show capture/gallery buttons
-                                Spacer(modifier = Modifier.weight(1f))
-
-                                ActionButtons(
-                                    onCaptureImage = ::captureImage,
-                                    onPickFromGallery = { cameraPhotoPickerLauncher.launch("image/*") },
-                                    enabled = !isProcessing && hasCameraPermission
-                                )
                             }
+
+                            Spacer(modifier = Modifier.weight(1f))
+
+                            ActionButtons(
+                                onCaptureImage = ::captureImageForCamera,
+                                onPickFromGallery = { imagePickerLauncher.launch("image/*") },
+                                enabled = !isProcessing && hasCameraPermission
+                            )
                         }
 
                         NavigationTab.DICTATION, NavigationTab.MEDICAL_CONTROL, NavigationTab.HOSPITAL -> {
@@ -1260,7 +1200,7 @@ suspend fun processImageWithVisionModel(bitmap: Bitmap, httpClient: HttpClient):
                   "recommendedDosage": "[Typical dosage/concentration/route]"
                 }
               ],
-              "summary": "[Drug1]. [Use]. [Drug2]. [Use].",
+              "summary": "[Drug 1], [Drug 2]",
               "error": null
             }
 
@@ -1271,8 +1211,8 @@ suspend fun processImageWithVisionModel(bitmap: Bitmap, httpClient: HttpClient):
             - indication: Max 10 words, quick reference label
             - color: Simple description (e.g., "Red", "Yellow", "Blue", "White")
             - position: left/center/right based on visual location
-            - for_voice: SHORT AUDIO - Only drug name, use in 5 words max, and dosage. Keep it under 15 seconds speech.
-            - for_display: Max 2 lines, name + primary use
+            - for_voice: SHORT (<15 seconds to read). Format: "[Drug Name]. [Clinical use in max 5 words]. [Typical dosage]." Example: "Aspirin. Pain relief and blood thinner. 500mg to 1000mg daily."
+            - for_display: Detailed information, can be longer
             - Return ONLY JSON, no markdown or explanations
             """.trimIndent()
 
