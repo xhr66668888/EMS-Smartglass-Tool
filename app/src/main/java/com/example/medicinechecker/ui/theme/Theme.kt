@@ -12,51 +12,33 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 
-private val DarkColorScheme = darkColorScheme(
-    primary = AquaTeal,
-    onPrimary = Color(0xFF00211B),
-    secondary = ElectricBlue,
-    tertiary = SunsetPeach,
-    background = MidnightIndigo,
-    surface = Color(0xFF24244A),
-    onBackground = Color(0xFFE8EAFF),
-    onSurface = Color(0xFFE8EAFF),
-    surfaceVariant = Color(0xFF3A3C69),
-    outline = Color(0xFF6A6C9A)
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = ElectricBlue,
-    onPrimary = Color.White,
-    secondary = AquaTeal,
-    onSecondary = Color(0xFF00211B),
-    tertiary = SunsetPeach,
-    background = MistySurface,
-    surface = Color.White,
-    onBackground = TextPrimary,
-    onSurface = TextPrimary,
-    surfaceVariant = Color(0xFFE3E6F5),
-    outline = TextSecondary.copy(alpha = 0.4f),
-    inverseSurface = MidnightIndigo,
-    inverseOnSurface = Color(0xFFE8EAFF)
+private val IndustrialColorScheme = darkColorScheme(
+    primary = IndustrialHighVisYellow,
+    onPrimary = Color.Black,
+    secondary = IndustrialOrange,
+    onSecondary = Color.Black,
+    tertiary = IndustrialCyan,
+    onTertiary = Color.Black,
+    background = IndustrialBlack,
+    onBackground = IndustrialTextPrimary,
+    surface = IndustrialSurface,
+    onSurface = IndustrialTextPrimary,
+    surfaceVariant = IndustrialDarkGray,
+    onSurfaceVariant = IndustrialTextSecondary,
+    error = IndustrialDanger,
+    onError = Color.Black,
+    outline = IndustrialTextSecondary
 )
 
 @Composable
 fun MedicineCheckerTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true, // Force Dark Theme
     // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = false,
+    dynamicColor: Boolean = false, // Disable dynamic color for consistency
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
+    // Always use Industrial Color Scheme
+    val colorScheme = IndustrialColorScheme
 
     MaterialTheme(
         colorScheme = colorScheme,

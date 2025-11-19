@@ -9,6 +9,7 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.speech.tts.TextToSpeech
 import android.util.Base64
 import android.util.Log
@@ -35,6 +36,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -78,6 +82,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Canvas
@@ -206,8 +212,33 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MedicineCheckerTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    MedicineAnalysisScreen(httpClient)
+                // Force 2:1 aspect ratio scaling (640x320)
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black), // Letterbox color
+                    contentAlignment = Alignment.Center
+                ) {
+                    val screenAspectRatio = maxWidth / maxHeight
+                    val targetAspectRatio = 640f / 320f // 2.0f
+                    
+                    val contentModifier = if (screenAspectRatio > targetAspectRatio) {
+                        // Screen is wider than target -> Fit Height, adjust Width (Pillarbox)
+                        Modifier
+                            .fillMaxHeight()
+                            .aspectRatio(targetAspectRatio)
+                    } else {
+                        // Screen is taller than target -> Fit Width, adjust Height (Letterbox)
+                        Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(targetAspectRatio)
+                    }
+                    
+                    Box(modifier = contentModifier) {
+                        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                            MedicineAnalysisScreen(httpClient)
+                        }
+                    }
                 }
             }
         }
@@ -221,12 +252,12 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun HeaderSection(isProcessing: Boolean, modifier: Modifier = Modifier) {
-    val isSmallScreen = getScreenSize().first < 700 // 640x320 is small
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(if (isSmallScreen) 12.dp else 18.dp))
-            .padding(if (isSmallScreen) 8.dp else 12.dp),
+            .border(1.dp, MaterialTheme.colorScheme.outline, RectangleShape)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -234,329 +265,55 @@ private fun HeaderSection(isProcessing: Boolean, modifier: Modifier = Modifier) 
             Icon(
                 imageVector = Icons.Filled.MedicalServices,
                 contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(if (isSmallScreen) 20.dp else 28.dp)
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
             )
-            Spacer(modifier = Modifier.width(if (isSmallScreen) 8.dp else 16.dp))
-            if (!isSmallScreen) {
-                Column {
-                    Text(
-                        text = "Medicine Checker",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "AI Medicine Recognition Assistant",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
-                }
-            } else {
-                Text(
-                    text = "Medicine Checker",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Color.White,
-                    modifier = Modifier.weight(1f)
-                )
-            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "EMS GLASS OS",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 1.sp
+            )
         }
-        StatusChip(text = if (isProcessing) "Analyzing…" else "Ready", isSmallScreen = isSmallScreen)
+        StatusChip(text = if (isProcessing) "ANALYZING" else "READY")
     }
 }
 
 @Composable
-private fun StatusChip(text: String, modifier: Modifier = Modifier, isSmallScreen: Boolean = false) {
+private fun StatusChip(text: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        color = Color.White.copy(alpha = 0.12f),
-        shape = RoundedCornerShape(50),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f))
+        color = if (text == "READY") MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f),
+        shape = RectangleShape,
+        border = BorderStroke(1.dp, if (text == "READY") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)
     ) {
         Text(
             text = text,
-            modifier = Modifier.padding(horizontal = if (isSmallScreen) 10.dp else 14.dp, vertical = if (isSmallScreen) 4.dp else 6.dp),
-            style = if (isSmallScreen) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
-            color = Color.White
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (text == "READY") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
         )
     }
 }
 
-@Composable
-private fun MultiBottleSelector(
-    bottles: List<MedicineBottle>,
-    selectedBottleId: String?,
-    onBottleSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val isSmallScreen = getScreenSize().first < 700
-    val spacing = if (isSmallScreen) 6.dp else 8.dp
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(if (isSmallScreen) 12.dp else 16.dp))
-            .padding(if (isSmallScreen) 8.dp else 12.dp),
-        verticalArrangement = Arrangement.spacedBy(spacing)
-    ) {
-        Text(
-            text = "Multiple Medicines Detected",
-            style = if (isSmallScreen) MaterialTheme.typography.labelSmall else MaterialTheme.typography.titleSmall,
-            color = Color.White,
-            modifier = Modifier.padding(bottom = if (isSmallScreen) 4.dp else 6.dp)
-        )
 
-        bottles.forEach { bottle ->
-            BottleButton(
-                bottle = bottle,
-                isSelected = selectedBottleId == bottle.id,
-                onSelect = { onBottleSelected(bottle.id) },
-                modifier = Modifier.heightIn(),
-                isSmallScreen = isSmallScreen
-            )
-        }
-    }
-}
 
-@Composable
-private fun BottleButton(
-    bottle: MedicineBottle,
-    isSelected: Boolean,
-    onSelect: () -> Unit,
-    modifier: Modifier = Modifier,
-    isSmallScreen: Boolean = false
-) {
-    val colorDesc = bottle.color?.let { "($it)" } ?: ""
-    val position = bottle.position?.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() } ?: ""
-    val label = "$position $colorDesc ${bottle.name}"
 
-    Button(
-        onClick = onSelect,
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(if (isSmallScreen) 8.dp else 12.dp))
-            .background(
-                if (isSelected)
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                else
-                    Color.White.copy(alpha = 0.1f)
-            ),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = Color.Transparent,
-            contentColor = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f)
-        ),
-        contentPadding = PaddingValues(if (isSmallScreen) 6.dp else 8.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = label,
-                style = if (isSmallScreen) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
-                maxLines = 1
-            )
-            Text(
-                text = bottle.indication,
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = if (isSmallScreen) 9.sp else 11.sp,
-                color = Color.White.copy(alpha = 0.7f),
-                maxLines = 1
-            )
-        }
-    }
-}
 
-@Composable
-private fun PhotoWithMedicineButtons(
-    uri: Uri,
-    context: Context,
-    bottles: List<MedicineBottle>,
-    onBottleSelected: (MedicineBottle) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-
-    LaunchedEffect(uri) {
-        bitmap = try {
-            decodeBitmapForUpload(context, uri, maxDimension = 720)
-        } catch (e: Exception) {
-            Log.e("PhotoWithMedicineButtons", "Failed to load image: ${e.message}")
-            null
-        }
-    }
-
-    // Color palette for different medicines
-    val medicineColors = listOf(
-        Color(0xFFFF6B6B),  // Red
-        Color(0xFF4ECDC4),  // Teal
-        Color(0xFFFFE66D),  // Yellow
-        Color(0xFF95E1D3),  // Mint
-        Color(0xFFC7CEEA),  // Lavender
-        Color(0xFFFF8B94),  // Pink
-        Color(0xFFB4A7D6),  // Purple
-        Color(0xFF73A580),  // Green
-    )
-
-    fun getPositionLabel(bottle: MedicineBottle, index: Int, totalCount: Int): String {
-        // If only one medicine, no position label needed
-        if (totalCount == 1) {
-            return ""
-        }
-
-        val position = bottle.position?.lowercase() ?: ""
-        val color = bottle.color?.lowercase() ?: ""
-
-        return when {
-            // For 2-3 medicines: use left/center/right descriptions
-            totalCount in 2..3 -> {
-                when (position) {
-                    "left" -> "[Left] "
-                    "center" -> "[Center] "
-                    "right" -> "[Right] "
-                    else -> "[Position ${index + 1}] "
-                }
-            }
-            // For many medicines: use color as identifier
-            totalCount > 3 -> {
-                when {
-                    color.isNotEmpty() && color != "unknown" -> "[${color.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }}] "
-                    else -> "[Item ${index + 1}] "
-                }
-            }
-            else -> "[Item ${index + 1}] "
-        }
-    }
-
-    Box(modifier = modifier.fillMaxWidth()) {
-        if (bitmap != null) {
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Image
-                Image(
-                    bitmap = bitmap!!.asImageBitmap(),
-                    contentDescription = "Selected medicine photo",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp)),
-                    contentScale = ContentScale.Fit
-                )
-
-                // Medicine list
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.surface,
-                            RoundedCornerShape(12.dp)
-                        )
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Detected ${bottles.size} medicine(s):",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
-
-                    bottles.forEachIndexed { index, bottle ->
-                        val colorIndex = index % medicineColors.size
-                        val itemColor = medicineColors[colorIndex]
-                        val positionLabel = getPositionLabel(bottle, index, bottles.size)
-
-                        Button(
-                            onClick = { onBottleSelected(bottle) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = itemColor.copy(alpha = 0.2f),
-                                contentColor = itemColor
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.5.dp, itemColor.copy(alpha = 0.5f))
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = positionLabel + bottle.name,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        maxLines = 1
-                                    )
-                                    bottle.indication?.let {
-                                        if (it.isNotBlank()) {
-                                            Text(
-                                                text = it,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = itemColor.copy(alpha = 0.7f),
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                }
-                                Text(
-                                    text = "+",
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    modifier = Modifier.padding(start = 8.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun AnalysisResultCard(resultText: String, modifier: Modifier = Modifier) {
     val scrollState = rememberScrollState()
-    val isSmallScreen = getScreenSize().first < 700
-    val cornerSize = if (isSmallScreen) 16.dp else 36.dp
-    val shadowSize = if (isSmallScreen) 12.dp else 26.dp
-    val padding = if (isSmallScreen) 12.dp else 28.dp
-    val minHeight = if (isSmallScreen) 60.dp else 120.dp
-    val maxHeight = if (isSmallScreen) 120.dp else 240.dp
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(shadowSize, RoundedCornerShape(cornerSize), clip = false)
-            .clip(RoundedCornerShape(cornerSize))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-            .border(
-                BorderStroke(
-                    1.2.dp,
-                    Brush.linearGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
-                        )
-                    )
-                ),
-                RoundedCornerShape(cornerSize)
-            )
-            .padding(padding)
-            .heightIn(min = minHeight, max = maxHeight)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+            .border(1.dp, MaterialTheme.colorScheme.primary, RectangleShape)
+            .padding(12.dp)
+            .heightIn(min = 60.dp, max = 120.dp)
     ) {
         Box(
             modifier = Modifier
@@ -565,8 +322,9 @@ private fun AnalysisResultCard(resultText: String, modifier: Modifier = Modifier
         ) {
             Text(
                 text = resultText,
-                style = if (isSmallScreen) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontFamily = FontFamily.Monospace
             )
         }
     }
@@ -597,22 +355,9 @@ private fun MedicineDetailCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(shadowSize, RoundedCornerShape(cornerSize), clip = false)
-            .clip(RoundedCornerShape(cornerSize))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-            .border(
-                BorderStroke(
-                    1.2.dp,
-                    Brush.linearGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
-                        )
-                    )
-                ),
-                RoundedCornerShape(cornerSize)
-            )
-            .padding(padding)
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.primary, RectangleShape)
+            .padding(12.dp)
     ) {
         Box(
             modifier = Modifier
@@ -633,7 +378,8 @@ private fun MedicineDetailCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.background, RoundedCornerShape(8.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RectangleShape)
+                            .background(MaterialTheme.colorScheme.background)
                             .padding(8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -723,240 +469,70 @@ private fun MedicineDetailCard(
     }
 }
 
-@Composable
-private fun ActionButtons(
-    onCaptureImage: () -> Unit,
-    onPickFromGallery: () -> Unit,
-    enabled: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val isSmallScreen = getScreenSize().first < 700
-    val cornerRadius = if (isSmallScreen) 12.dp else 24.dp
-    val padding = if (isSmallScreen) 8.dp else 16.dp
-    val spacing = if (isSmallScreen) 8.dp else 16.dp
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
-            .padding(padding),
-        verticalArrangement = Arrangement.spacedBy(spacing)
-    ) {
-        GradientPrimaryButton(
-            text = if (isSmallScreen) "Photo" else "Take Photo",
-            icon = Icons.Filled.CameraAlt,
-            onClick = onCaptureImage,
-            enabled = enabled,
-            isSmallScreen = isSmallScreen
-        )
-        GradientSecondaryButton(
-            text = if (isSmallScreen) "Gallery" else "Pick from Gallery",
-            icon = Icons.Filled.Image,
-            onClick = onPickFromGallery,
-            enabled = enabled,
-            isSmallScreen = isSmallScreen
-        )
-    }
-}
 
 @Composable
-private fun GradientPrimaryButton(
+private fun IndustrialPrimaryButton(
     text: String,
     icon: ImageVector,
     onClick: () -> Unit,
     enabled: Boolean,
-    modifier: Modifier = Modifier,
-    isSmallScreen: Boolean = false
+    modifier: Modifier = Modifier
 ) {
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val tertiaryColor = MaterialTheme.colorScheme.tertiary
-    val gradient = remember(primaryColor, tertiaryColor) {
-        Brush.linearGradient(
-            colors = listOf(
-                primaryColor,
-                tertiaryColor
-            )
-        )
-    }
-    val cornerRadius = if (isSmallScreen) 12.dp else 24.dp
-    val shadowSize = if (isSmallScreen) 8.dp else 20.dp
-    val iconSize = if (isSmallScreen) 16.dp else 22.dp
-    val spacerWidth = if (isSmallScreen) 6.dp else 12.dp
-    val contentPaddingH = if (isSmallScreen) 12.dp else 24.dp
-    val contentPaddingV = if (isSmallScreen) 10.dp else 18.dp
-
     Button(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier
             .fillMaxWidth()
-            .shadow(shadowSize, RoundedCornerShape(cornerRadius), clip = false)
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(gradient),
+            .height(48.dp),
+        shape = RectangleShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+            disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.3f)
+        ),
+        contentPadding = PaddingValues(horizontal = 16.dp)
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = text, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+@Composable
+private fun IndustrialSecondaryButton(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .border(1.dp, MaterialTheme.colorScheme.primary, RectangleShape),
+        shape = RectangleShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = Color.Transparent,
-            disabledContainerColor = Color.Transparent,
-            contentColor = Color.White,
-            disabledContentColor = Color.White.copy(alpha = 0.4f)
-        ),
-        contentPadding = PaddingValues(horizontal = contentPaddingH, vertical = contentPaddingV)
-    ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(iconSize))
-        Spacer(modifier = Modifier.width(spacerWidth))
-        Text(text = text, style = if (isSmallScreen) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium)
-    }
-}
-
-@Composable
-private fun GradientSecondaryButton(
-    text: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-    isSmallScreen: Boolean = false
-) {
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val secondaryColor = MaterialTheme.colorScheme.secondary
-    val borderBrush = remember(primaryColor, secondaryColor) {
-        Brush.linearGradient(
-            colors = listOf(
-                primaryColor.copy(alpha = 0.8f),
-                secondaryColor.copy(alpha = 0.8f)
-            )
-        )
-    }
-    val cornerRadius = if (isSmallScreen) 12.dp else 24.dp
-    val borderWidth = if (isSmallScreen) 1.dp else 1.4.dp
-    val iconSize = if (isSmallScreen) 16.dp else 22.dp
-    val spacerWidth = if (isSmallScreen) 6.dp else 12.dp
-    val contentPaddingH = if (isSmallScreen) 12.dp else 24.dp
-    val contentPaddingV = if (isSmallScreen) 10.dp else 16.dp
-
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(cornerRadius)),
-        border = BorderStroke(borderWidth, borderBrush),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
             contentColor = MaterialTheme.colorScheme.primary,
-            disabledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-            disabledContentColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+            disabledContainerColor = Color.Transparent,
+            disabledContentColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
         ),
-        contentPadding = PaddingValues(horizontal = contentPaddingH, vertical = contentPaddingV)
+        contentPadding = PaddingValues(horizontal = 16.dp)
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(iconSize))
-        Spacer(modifier = Modifier.width(spacerWidth))
-        Text(text = text, style = if (isSmallScreen) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium)
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = text, style = MaterialTheme.typography.labelLarge)
     }
 }
 
-@Composable
-private fun ProcessingOverlay(modifier: Modifier = Modifier) {
-    val isSmallScreen = getScreenSize().first < 700
-    val cornerRadius = if (isSmallScreen) 12.dp else 24.dp
-    val paddingH = if (isSmallScreen) 14.dp else 28.dp
-    val paddingV = if (isSmallScreen) 12.dp else 20.dp
-    val spacing = if (isSmallScreen) 10.dp else 20.dp
-    val indicatorSize = if (isSmallScreen) 32.dp else 48.dp
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.6f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            shape = RoundedCornerShape(cornerRadius),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-            tonalElevation = 12.dp,
-            shadowElevation = 10.dp
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = paddingH, vertical = paddingV),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(spacing)
-            ) {
-                CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(indicatorSize),
-                    strokeWidth = if (isSmallScreen) 3.dp else 4.dp
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = if (isSmallScreen) "Analyzing…" else "Analyzing photo…",
-                        style = if (isSmallScreen) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (!isSmallScreen) {
-                        Text(
-                            text = "Loading medicine information",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
-enum class NavigationTab(val label: String, val icon: ImageVector) {
-    SCAN("SCAN", Icons.Filled.Home),
-    CAMERA("CAMERA", Icons.Filled.CameraAlt),
-    DICTATION("DICTATION", Icons.Filled.Mic),
-    MEDICAL_CONTROL("MEDICAL CONTROL", Icons.Filled.MedicalServices),
-    HOSPITAL("HOSPITAL", Icons.Filled.MedicalServices)
-}
 
-@Composable
-private fun BottomNavigationBar(
-    selectedTab: NavigationTab,
-    onTabSelected: (NavigationTab) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val isSmallScreen = getScreenSize().first < 700
-
-    NavigationBar(
-        modifier = modifier
-            .fillMaxWidth(),
-        containerColor = Color.Black.copy(alpha = 0.8f),
-        tonalElevation = 8.dp
-    ) {
-        NavigationTab.entries.forEach { tab ->
-            NavigationBarItem(
-                icon = {
-                    Icon(
-                        imageVector = tab.icon,
-                        contentDescription = tab.label,
-                        modifier = Modifier.size(if (isSmallScreen) 20.dp else 24.dp)
-                    )
-                },
-                label = if (isSmallScreen) null else {
-                    {
-                        Text(
-                            tab.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1
-                        )
-                    }
-                },
-                selected = selectedTab == tab,
-                onClick = { onTabSelected(tab) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                    unselectedIconColor = Color.White.copy(alpha = 0.6f),
-                    unselectedTextColor = Color.White.copy(alpha = 0.6f),
-                    indicatorColor = Color.White.copy(alpha = 0.1f)
-                )
-            )
-        }
-    }
-}
 
 @Composable
 private fun ScanHistoryItem(
@@ -966,7 +542,6 @@ private fun ScanHistoryItem(
     onSelect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isSmallScreen = getScreenSize().first < 700
     val textColor = MaterialTheme.colorScheme.onSurface
     val timeText = remember(history.timestamp) {
         val sdf = java.text.SimpleDateFormat("HH:mm:ss", Locale.ROOT)
@@ -977,23 +552,17 @@ private fun ScanHistoryItem(
         onClick = onSelect,
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(if (isSmallScreen) 8.dp else 12.dp))
-            .background(
-                if (isSelected)
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                else
-                    Color.White.copy(alpha = 0.08f)
-            ),
+            .border(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RectangleShape),
         colors = ButtonDefaults.buttonColors(
-            containerColor = Color.Transparent,
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent,
             contentColor = textColor
         ),
-        contentPadding = PaddingValues(if (isSmallScreen) 10.dp else 12.dp)
+        shape = RectangleShape,
+        contentPadding = PaddingValues(8.dp)
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(if (isSmallScreen) 4.dp else 8.dp),
+                .fillMaxWidth(),
             verticalArrangement = Arrangement.Center
         ) {
             Row(
@@ -1002,14 +571,14 @@ private fun ScanHistoryItem(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${history.bottles.size} medicine(s)",
-                    style = if (isSmallScreen) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
+                    text = "${history.bottles.size} MEDICINE(S)",
+                    style = MaterialTheme.typography.labelSmall,
                     maxLines = 1
                 )
                 Text(
                     text = timeText,
                     style = MaterialTheme.typography.labelSmall,
-                    fontSize = if (isSmallScreen) 9.sp else 10.sp,
+                    fontSize = 10.sp,
                     color = textColor.copy(alpha = 0.6f),
                     maxLines = 1
                 )
@@ -1018,7 +587,7 @@ private fun ScanHistoryItem(
             if (history.bottles.isNotEmpty()) {
                 Text(
                     text = history.bottles.joinToString(", ") { it.name },
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.bodySmall,
                     color = textColor.copy(alpha = 0.7f),
                     maxLines = 1
                 )
@@ -1033,10 +602,18 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
 
+    // State Management
     var hasCameraPermission by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableStateOf(NavigationTab.SCAN) }
     val imageCapture = remember { ImageCapture.Builder().build() }
+    
+    // Core State
+    var currentImageUri by remember { mutableStateOf<Uri?>(null) } // Null = Camera Mode, Not Null = Result Mode
+    var analysisResult by remember { mutableStateOf<MedicineAnalysis?>(null) }
+    var selectedMedicine by remember { mutableStateOf<MedicineBottle?>(null) } // Null = List, Not Null = Detail
+    var isProcessing by remember { mutableStateOf(false) }
+    var scanHistories by remember { mutableStateOf<List<ScanHistory>>(emptyList()) }
 
+    // Permissions
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { isGranted -> hasCameraPermission = isGranted }
@@ -1049,460 +626,291 @@ fun MedicineAnalysisScreen(httpClient: HttpClient) {
         }
     }
 
-    var isProcessing by remember { mutableStateOf(false) }
-
-    // SCAN tab - On-demand scanning with history
-    var scanHistories by remember { mutableStateOf<List<ScanHistory>>(emptyList()) }
-    var currentScanResult by remember { mutableStateOf<MedicineAnalysis?>(null) }
-    var currentScanImageUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedHistoryIndex by remember { mutableStateOf<Int?>(-1) }
-    var scanSelectedBottleDetails by remember { mutableStateOf<MedicineBottle?>(null) }
-
-    // CAMERA tab - Photo analysis
-    var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
-    var cameraAnalysisResult by remember { mutableStateOf<MedicineAnalysis?>(null) }
-    var cameraDetectedBottles by remember { mutableStateOf<List<MedicineBottle>>(emptyList()) }
-    var cameraSelectedBottleId by remember { mutableStateOf<String?>(null) }
-    var cameraSelectedBottleDetails by remember { mutableStateOf<MedicineBottle?>(null) }
-
+    // TTS
     val tts = remember {
         TextToSpeech(context, null).apply {
             language = Locale.ENGLISH
         }
     }
-
+    
     DisposableEffect(Unit) {
         onDispose { tts.shutdown() }
     }
 
-    // Play voice output when CAMERA analysis completes
-    LaunchedEffect(cameraAnalysisResult) {
-        cameraAnalysisResult?.for_voice?.let {
-            if (it.isNotBlank()) {
-                tts.speak(it, TextToSpeech.QUEUE_FLUSH, null, null)
+    // TTS Effect
+    LaunchedEffect(selectedMedicine) {
+        selectedMedicine?.for_voice?.let { voiceText ->
+            if (voiceText.isNotBlank()) {
+                tts.speak(voiceText, TextToSpeech.QUEUE_FLUSH, null, null)
             }
         }
     }
-
-    fun scanImageForAnalysis() {
+    
+    // Scan Function
+    fun scanImage() {
         coroutineScope.launch {
             try {
                 isProcessing = true
-                // Reset state
-                scanSelectedBottleDetails = null
-                selectedHistoryIndex = -1
-
+                selectedMedicine = null
+                analysisResult = null
+                
                 val uri = imageCapture.takePicture(context)
-                currentScanImageUri = uri
-                Log.d("ScanAnalysis", "Starting to scan image: $uri")
+                currentImageUri = uri
+                Log.d("Scan", "Image captured: $uri")
 
-                currentScanResult = runCatching {
-                    Log.d("ScanAnalysis", "Decoding bitmap...")
+                analysisResult = runCatching {
                     val bitmap = decodeBitmapForUpload(context, uri)
-                    Log.d("ScanAnalysis", "Bitmap decoded, size: ${bitmap.width}x${bitmap.height}")
-
-                    Log.d("ScanAnalysis", "Sending to Gemini for medicine analysis...")
                     val result = processImageWithVisionModel(bitmap, httpClient)
-                    Log.d("ScanAnalysis", "Gemini result: $result")
-
-                    // Get outline coordinates for each bottle
+                    
+                    // Get outlines if bottles detected
                     if (result.bottles != null && result.bottles.isNotEmpty()) {
-                        Log.d("ScanAnalysis", "Getting medicine outlines...")
                         val outlines = getMedicineOutlines(bitmap, httpClient)
-                        Log.d("ScanAnalysis", "Got outlines for ${outlines.size} bottles")
-
-                        // Add outlines to bottles
                         val bottlesWithOutlines = result.bottles.mapIndexed { index, bottle ->
                             val outlineKey = "bottle_${index + 1}"
-                            val outline = outlines[outlineKey]
-                            if (outline != null) {
-                                bottle.copy(outline = outline)
-                            } else {
-                                bottle
-                            }
+                            outlines[outlineKey]?.let { bottle.copy(outline = it) } ?: bottle
                         }
-
                         result.copy(bottles = bottlesWithOutlines)
                     } else {
                         result
                     }
                 }.getOrElse {
-                    Log.e("ScanAnalysis", "Failed to process scan image: ${it.message}", it)
-                    MedicineAnalysis(error = "Scan failed: ${it.localizedMessage ?: "Unknown error"}")
+                    Log.e("Scan", "Analysis failed", it)
+                    MedicineAnalysis(error = "Scan failed: ${it.localizedMessage}")
                 }
 
-                // Save to history (max 10 items, FIFO - only remove oldest when exceeds 10)
-                if (currentScanResult?.bottles != null && currentScanResult?.bottles!!.isNotEmpty()) {
-                    val newHistoryItem = ScanHistory(
+                // Save to history
+                if (analysisResult?.bottles?.isNotEmpty() == true) {
+                    val newHistory = ScanHistory(
                         id = UUID.randomUUID().toString(),
                         timestamp = System.currentTimeMillis(),
-                        bottles = currentScanResult!!.bottles!!,
+                        bottles = analysisResult!!.bottles!!,
                         imageUri = uri.toString()
                     )
-                    scanHistories = (listOf(newHistoryItem) + scanHistories).take(10) // Keep up to 10 items
-                    Log.d("ScanAnalysis", "Added to history. Total items: ${scanHistories.size}")
+                    scanHistories = (listOf(newHistory) + scanHistories).take(10)
                 }
 
-                cleanupTemporaryImage(context, uri)
                 isProcessing = false
-                Log.d("ScanAnalysis", "Scan complete. Result: $currentScanResult")
             } catch (e: Exception) {
-                Log.e("ScanAnalysis", "Failed to capture image for scan", e)
-                currentScanResult = MedicineAnalysis(error = "Capture failed: ${e.localizedMessage}")
+                Log.e("Scan", "Capture failed", e)
+                analysisResult = MedicineAnalysis(error = "Capture failed: ${e.localizedMessage}")
                 isProcessing = false
             }
         }
     }
 
-    fun processImageForCamera(uri: Uri, fromCamera: Boolean) {
-        coroutineScope.launch {
-            isProcessing = true
-            cameraSelectedBottleId = null
-            cameraSelectedBottleDetails = null
-            cameraDetectedBottles = emptyList()
-            cameraPhotoUri = uri
-            Log.d("CameraProcessing", "Starting to process image: $uri")
-
-            cameraAnalysisResult = runCatching {
-                Log.d("CameraProcessing", "Decoding bitmap...")
-                val bitmap = decodeBitmapForUpload(context, uri)
-                Log.d("CameraProcessing", "Bitmap decoded, size: ${bitmap.width}x${bitmap.height}")
-
-                Log.d("CameraProcessing", "Sending to Gemini for medicine analysis...")
-                val result = processImageWithVisionModel(bitmap, httpClient)
-                Log.d("CameraProcessing", "Gemini result: $result")
-
-                // Get outline coordinates for each bottle
-                if (result.bottles != null && result.bottles.isNotEmpty()) {
-                    Log.d("CameraProcessing", "Getting medicine outlines...")
-                    val outlines = getMedicineOutlines(bitmap, httpClient)
-                    Log.d("CameraProcessing", "Got outlines for ${outlines.size} bottles")
-
-                    // Add outlines to bottles
-                    val bottlesWithOutlines = result.bottles.mapIndexed { index, bottle ->
-                        val outlineKey = "bottle_${index + 1}"
-                        val outline = outlines[outlineKey]
-                        if (outline != null) {
-                            bottle.copy(outline = outline)
-                        } else {
-                            bottle
-                        }
-                    }
-
-                    result.copy(bottles = bottlesWithOutlines)
-                } else {
-                    result
-                }
-            }.getOrElse {
-                Log.e("CameraProcessing", "Failed to process camera image: ${it.message}", it)
-                MedicineAnalysis(error = "Processing failed: ${it.localizedMessage ?: "Unknown error"}")
-            }.also { result ->
-                // Extract bottles from result for CAMERA tab
-                if (result.bottles != null && result.bottles.isNotEmpty()) {
-                    cameraDetectedBottles = result.bottles
-                    Log.d("CameraProcessing", "Camera detected ${cameraDetectedBottles.size} bottles")
-                } else {
-                    Log.d("CameraProcessing", "No bottles detected or error: ${result.error}")
-                }
-            }
-
-            if (fromCamera) {
-                cleanupTemporaryImage(context, uri)
-            }
-            isProcessing = false
-            Log.d("CameraProcessing", "Processing complete. Result: $cameraAnalysisResult")
-        }
+    // Load from History
+    fun loadHistory(history: ScanHistory) {
+        currentImageUri = Uri.parse(history.imageUri)
+        analysisResult = MedicineAnalysis(
+            bottles = history.bottles,
+            for_display = "Loaded from history"
+        )
+        selectedMedicine = null
     }
 
-    val imagePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
-        onResult = { uri: Uri? -> uri?.let { processImageForCamera(it, fromCamera = false) } }
-    )
-
-    fun captureImageForCamera() {
-        coroutineScope.launch {
-            try {
-                val uri = imageCapture.takePicture(context)
-                processImageForCamera(uri, fromCamera = true)
-            } catch (e: Exception) {
-                Log.e("MedicineAnalysis", "Failed to capture image", e)
-                cameraAnalysisResult = MedicineAnalysis(error = "Capture failed: ${e.localizedMessage}")
-            }
-        }
+    // Reset
+    fun resetToCamera() {
+        currentImageUri = null
+        analysisResult = null
+        selectedMedicine = null
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            modifier = Modifier.fillMaxSize().systemBarsPadding().padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // LEFT COLUMN: Visuals (Camera / Image)
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
                     .weight(1f)
+                    .fillMaxHeight()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RectangleShape)
+                    .background(Color.Black)
             ) {
-                if (hasCameraPermission) {
-                    CameraPreview(lifecycleOwner, imageCapture)
+                if (currentImageUri == null) {
+                    // Camera Mode
+                    if (hasCameraPermission) {
+                        CameraPreview(lifecycleOwner, imageCapture)
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Camera Permission Required", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "Camera permission not granted. Please enable it in app settings.",
-                            color = Color.White,
-                            modifier = Modifier.padding(16.dp)
+                    // Result Mode - Show Image
+                    val bitmap = remember(currentImageUri) {
+                        try {
+                            if (Build.VERSION.SDK_INT >= 28) {
+                                val source = ImageDecoder.createSource(context.contentResolver, currentImageUri!!)
+                                ImageDecoder.decodeBitmap(source)
+                            } else {
+                                MediaStore.Images.Media.getBitmap(context.contentResolver, currentImageUri)
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Captured Image",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
                         )
                     }
                 }
 
-                val isSmallScreen = getScreenSize().first < 700
-                val horizontalPadding = if (isSmallScreen) 12.dp else 24.dp
-                val verticalPadding = if (isSmallScreen) 8.dp else 16.dp
+                // Error Overlay (Top Center)
+                if (analysisResult?.error != null) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 16.dp)
+                            .background(Color.Black.copy(alpha = 0.8f))
+                            .border(1.dp, MaterialTheme.colorScheme.error, RectangleShape)
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = analysisResult!!.error!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .systemBarsPadding()
-                        .padding(horizontal = horizontalPadding, vertical = verticalPadding),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    HeaderSection(isProcessing = isProcessing)
-
-                    when (selectedTab) {
-                        NavigationTab.SCAN -> {
-                            // SCAN tab - Show history always, and scan details when clicked
-                            if (scanSelectedBottleDetails != null) {
-                                // Show detailed medicine info when a bottle is selected
-                                MedicineDetailCard(
-                                    medicine = scanSelectedBottleDetails!!,
-                                    onClose = {
-                                        scanSelectedBottleDetails = null
-                                    },
-                                    onVoiceOutput = { voiceText ->
-                                        tts.speak(voiceText, TextToSpeech.QUEUE_FLUSH, null, null)
-                                    }
-                                )
-                            } else if (currentScanImageUri != null && currentScanResult != null) {
-                                // Show scan result (image + medicines detected in this scan)
-                                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    if (currentScanResult?.bottles?.isNotEmpty() == true) {
-                                        // Show photo with medicine buttons
-                                        PhotoWithMedicineButtons(
-                                            uri = currentScanImageUri!!,
-                                            context = context,
-                                            bottles = currentScanResult!!.bottles!!,
-                                            onBottleSelected = { bottle ->
-                                                scanSelectedBottleDetails = bottle
-                                            }
-                                        )
-                                    } else if (currentScanResult?.error != null) {
-                                        // Show error message
-                                        AnalysisResultCard(resultText = currentScanResult?.error ?: "Scan failed")
-                                    } else {
-                                        // No medicines detected
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                                .padding(16.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                "No medicines detected in this image",
-                                                color = Color.White.copy(alpha = 0.7f),
-                                                style = MaterialTheme.typography.bodySmall
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.weight(1f))
-
-                                    // Back to history button
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                                            .padding(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        GradientSecondaryButton(
-                                            text = "Back to History",
-                                            icon = Icons.Filled.CameraAlt,
-                                            onClick = {
-                                                currentScanImageUri = null
-                                                currentScanResult = null
-                                            },
-                                            enabled = true,
-                                            isSmallScreen = getScreenSize().first < 700
-                                        )
-                                    }
-                                }
-                            } else {
-                                // Show history list
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .weight(1f)
-                                        .verticalScroll(rememberScrollState()),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = "Scans (${scanHistories.size})",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    )
-
-                                    if (scanHistories.isNotEmpty()) {
-                                        scanHistories.forEachIndexed { index, history ->
-                                            ScanHistoryItem(
-                                                history = history,
-                                                context = context,
-                                                isSelected = selectedHistoryIndex == index,
-                                                onSelect = {
-                                                    selectedHistoryIndex = index
-                                                    currentScanImageUri = Uri.parse(history.imageUri)
-                                                    currentScanResult = MedicineAnalysis(
-                                                        bottles = history.bottles,
-                                                        for_display = "Loaded from history",
-                                                        for_voice = "Scan from ${history.timestamp}"
-                                                    )
-                                                }
-                                            )
-                                        }
-                                    } else {
-                                        Text(
-                                            text = "No scans yet. Tap below to scan medicines.",
-                                            color = Color.White.copy(alpha = 0.6f),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            modifier = Modifier.padding(16.dp)
-                                        )
-                                    }
-                                }
-
-                                // "Tap to Scan" button at bottom
-                                GradientPrimaryButton(
-                                    text = if (getScreenSize().first < 700) "Scan" else "Tap to Scan",
-                                    icon = Icons.Filled.CameraAlt,
-                                    onClick = ::scanImageForAnalysis,
-                                    enabled = !isProcessing && hasCameraPermission,
-                                    isSmallScreen = getScreenSize().first < 700
-                                )
-                            }
-                        }
-
-                        NavigationTab.CAMERA -> {
-                            // CAMERA tab - Photo selection and analysis
-                            if (cameraSelectedBottleDetails != null) {
-                                // Show detailed medicine info when a bottle is selected
-                                MedicineDetailCard(
-                                    medicine = cameraSelectedBottleDetails!!,
-                                    onClose = {
-                                        cameraSelectedBottleDetails = null
-                                    },
-                                    onVoiceOutput = { voiceText ->
-                                        tts.speak(voiceText, TextToSpeech.QUEUE_FLUSH, null, null)
-                                    }
-                                )
-                            } else if (cameraPhotoUri != null) {
-                                // Photo has been selected
-                                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    if (cameraAnalysisResult != null) {
-                                        // Analysis completed
-                                        if (cameraDetectedBottles.isNotEmpty()) {
-                                            // Show photo with medicine buttons
-                                            PhotoWithMedicineButtons(
-                                                uri = cameraPhotoUri!!,
-                                                context = context,
-                                                bottles = cameraDetectedBottles,
-                                                onBottleSelected = { bottle ->
-                                                    cameraSelectedBottleDetails = bottle
-                                                }
-                                            )
-                                        } else if (cameraAnalysisResult?.error != null) {
-                                            // Show error message
-                                            AnalysisResultCard(resultText = cameraAnalysisResult?.error ?: "Analysis failed")
-                                        } else {
-                                            // No medicines detected
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                                    .padding(16.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    "No medicines detected in this image",
-                                                    color = Color.White.copy(alpha = 0.7f),
-                                                    style = MaterialTheme.typography.bodySmall
-                                                )
-                                            }
-                                        }
-                                    } else {
-                                        // Still analyzing
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                                .padding(16.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.weight(1f))
-
-                                    // Show action buttons to change photo
-                                    ActionButtons(
-                                        onCaptureImage = ::captureImageForCamera,
-                                        onPickFromGallery = { imagePickerLauncher.launch("image/*") },
-                                        enabled = !isProcessing && hasCameraPermission
-                                    )
-                                }
-                            } else {
-                                // No photo selected yet
-                                Spacer(modifier = Modifier.weight(1f))
-
-                                ActionButtons(
-                                    onCaptureImage = ::captureImageForCamera,
-                                    onPickFromGallery = { imagePickerLauncher.launch("image/*") },
-                                    enabled = !isProcessing && hasCameraPermission
-                                )
-                            }
-                        }
-
-                        NavigationTab.DICTATION, NavigationTab.MEDICAL_CONTROL, NavigationTab.HOSPITAL -> {
-                            // Placeholder for other tabs
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                    .padding(16.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "${selectedTab.label} - Coming soon",
-                                    color = Color.White.copy(alpha = 0.7f),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
+                // Processing Overlay
+                if (isProcessing) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.5f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
 
-            // Bottom Navigation Bar
-            BottomNavigationBar(
-                selectedTab = selectedTab,
-                onTabSelected = { newTab ->
-                    selectedTab = newTab
-                }
-            )
-        }
+            // RIGHT COLUMN: Data & Interaction
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                HeaderSection(isProcessing = isProcessing)
 
-        if (isProcessing) {
-            ProcessingOverlay()
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RectangleShape)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
+                        .padding(8.dp)
+                ) {
+                    if (currentImageUri == null) {
+                        // Camera Mode: Show History
+                         Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "RECENT SCANS",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (scanHistories.isEmpty()) {
+                                    Text(
+                                        "No recent scans",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    )
+                                } else {
+                                    scanHistories.forEach { history ->
+                                        ScanHistoryItem(
+                                            history = history,
+                                            context = context,
+                                            isSelected = false,
+                                            onSelect = { loadHistory(history) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else if (selectedMedicine != null) {
+                        // Detail Mode: Show Medicine Details
+                        MedicineDetailCard(
+                            medicine = selectedMedicine!!,
+                            onClose = { selectedMedicine = null }, // Back to List
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        // Result Mode: Show Medicine List
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "DETECTED MEDICINES",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            
+                            val bottles = analysisResult?.bottles
+                            if (bottles.isNullOrEmpty()) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        if (analysisResult?.error != null) "Scan Error" else "No medicines detected",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                    )
+                                }
+                            } else {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    bottles.forEach { bottle ->
+                                        IndustrialSecondaryButton(
+                                            text = bottle.name,
+                                            icon = Icons.Filled.MedicalServices,
+                                            onClick = { selectedMedicine = bottle },
+                                            enabled = true
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom Action Button
+                if (currentImageUri == null) {
+                    IndustrialPrimaryButton(
+                        text = "SCAN MEDICINES",
+                        icon = Icons.Filled.CameraAlt,
+                        onClick = ::scanImage,
+                        enabled = !isProcessing && hasCameraPermission
+                    )
+                } else {
+                    IndustrialSecondaryButton(
+                        text = "BACK TO CAMERA",
+                        icon = Icons.Filled.CameraAlt,
+                        onClick = ::resetToCamera,
+                        enabled = !isProcessing
+                    )
+                }
+            }
         }
     }
 }
@@ -1543,24 +951,29 @@ private fun CameraPreview(lifecycleOwner: androidx.lifecycle.LifecycleOwner, ima
 
 private suspend fun ImageCapture.takePicture(context: Context): Uri {
     val file = File.createTempFile("captured_image_${System.currentTimeMillis()}", ".jpg", context.cacheDir)
-    val outputFileOptions = ImageCapture.OutputFileOptions.Builder(file).build()
-
     return suspendCancellableCoroutine { continuation ->
-        takePicture(outputFileOptions, ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageSavedCallback {
-            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                outputFileResults.savedUri?.let {
-                    continuation.resume(it)
-                } ?: continuation.resumeWithException(IOException("Failed to save image"))
-            }
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(file).build()
 
-            override fun onError(exception: ImageCaptureException) {
-                continuation.resumeWithException(exception)
+        this.takePicture(
+            outputOptions,
+            ContextCompat.getMainExecutor(context),
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    output.savedUri?.let {
+                        continuation.resume(it)
+                    } ?: continuation.resumeWithException(IOException("Failed to save image"))
+                }
+
+                override fun onError(exc: ImageCaptureException) {
+                    Log.e("CameraX", "Photo capture failed: ${exc.message}", exc)
+                    continuation.resumeWithException(exc)
+                }
             }
-        })
+        )
     }
 }
 
-private suspend fun decodeBitmapForUpload(context: Context, uri: Uri, maxDimension: Int = 1024): Bitmap {
+private suspend fun decodeBitmapForUpload(context: Context, uri: Uri, maxDimension: Int = 640): Bitmap {
     return withContext(Dispatchers.IO) {
         if (Build.VERSION.SDK_INT >= 28) {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
@@ -1611,11 +1024,14 @@ suspend fun processImageWithVisionModel(bitmap: Bitmap, httpClient: HttpClient):
             val prompt = """
 Identify pharmaceutical products in this image. Return valid JSON only.
 
-For EACH medicine bottle, provide a simple "for_voice" field with ONLY: name, clinical use (max 5 words), and dosage. Example: "Aspirin: pain relief. 500mg per dose."
+For EACH medicine bottle, provide a simple "for_voice" field with ONLY: name, clinical use (max 5 words), dosage, and key side effects. Example: "Aspirin: pain relief. 500mg per dose. Warning: stomach bleeding."
+
+For "dosage" field: Provide strength + quantity (e.g., "500mg, 1 tablet"). Infer from standard usage if not strictly visible. Do NOT return "label not visible".
+For "effects" field: List key adverse reactions/side effects concisely (max 5 words).
 
 Return JSON format - NO markdown code blocks:
 
-{"error": null, "bottles": [{"id": "bottle_1", "name": "medicine name", "position": "left", "color": "color", "indication": "use", "appliedSituations": "conditions", "effects": "effects", "recommendedDosage": "dosage", "for_voice": "name: use. dosage."}]}
+{"error": null, "bottles": [{"id": "bottle_1", "name": "medicine name", "position": "left", "color": "color", "indication": "use", "appliedSituations": "conditions", "effects": "side effects", "recommendedDosage": "dosage", "for_voice": "name: use. dosage. side effects."}]}
 
 If no products: {"error": "not a medicine"}
 
